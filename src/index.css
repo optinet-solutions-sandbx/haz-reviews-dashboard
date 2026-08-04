@@ -1,0 +1,236 @@
+@import "tailwindcss";
+
+/* Tailwind v4 auto-detects sources and generates real CSS from class-looking
+   strings found inside committed markdown. Without this exclusion, an old
+   plan or spec file keeps emitting rules for hexes that no longer exist in
+   src/ — dead CSS that is very hard to trace back to its origin.
+   Gitignored paths are skipped automatically; committed doc folders are not. */
+@source not "../docs";
+
+@theme {
+  --font-display: 'Outfit', sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+  --font-body: 'Figtree', sans-serif;
+}
+
+/* ─── Tier 1 · semantic app tokens ───────────────────────────────────────
+   Light values on :root, dark overrides under .dark (class toggled on <html>
+   by applyTheme before first paint). Nothing outside this file hard-codes a
+   hex; components reference var(--token). */
+:root {
+  --page: #F5F7FA;
+  --grid-line: #E7ECF3;
+  --surface: #FFFFFF;
+  --surface-2: #FAFBFD;
+  --surface-3: #F2F5F9;
+  --hover: #F0F4F9;
+
+  --border: #DCE3ED;
+  --border-2: #E4EAF2;
+  --border-3: #EDF1F7;
+  --border-strong: #C6D0DE;
+
+  --ink: #101A2E;
+  --ink-2: #1E293B;
+  --text-2: #475467;
+  --muted: #64728A;
+  --muted-2: #7C8AA1;
+  --muted-3: #94A2B8;
+
+  /* The three brand hues are identical in both themes on purpose. */
+  --brand-navy: #1E2A6E;
+  --brand-blue: #1C9FE0;
+  --brand-light: #7FD4F5;
+  --navy-text: #1E2A6E;
+  --brand-blue-deep: #1580B8;
+
+  --btn-ink: #101A2E;
+  --btn-ink-hover: #1E2A6E;
+  --active-tint: #EAF4FC;
+
+  --pos: #0F7A3D;
+  --pos-surface: #E8F6EE;
+  --pos-border: #BEE3CE;
+  --neg: #C42A3B;
+  --neg-surface: #FCEBEC;
+  --neg-border: #F3C7CC;
+  --info: #1F5FBF;
+  --info-surface: #EAF1FC;
+  --info-border: #C6D9F5;
+  --warn: #B45309;
+  --warn-surface: #FDF3E7;
+  --warn-border: #F5DDBC;
+
+  --scrollbar: #C6D0DE;
+  --scrollbar-hover: #A9B6C8;
+
+  /* ─── Tier 2 · matrix tokens ─────────────────────────────────────────
+     HARD CONSTRAINT: every --mx-* background must be fully opaque in both
+     themes. Sticky cells overlay scrolled content, and any alpha lets rows
+     show through as they pass underneath. --mx-hover is the single exception
+     and is applied only to non-sticky cells. */
+  --mx-bg: #FFFFFF;
+  --mx-alt: #F7F9FC;
+  --mx-ink: #1B2436;
+  --mx-ink-2: #55627A;
+  --mx-line: #DFE6F0;
+  --mx-line-2: #EAEFF6;
+  --mx-head: #EEF2F8;
+  --mx-head-ink: #2A3550;
+  --mx-sticky: #FFFFFF;
+  --mx-sticky-alt: #F7F9FC;
+  --mx-pos: #0F7A3D;
+  --mx-neg: #C42A3B;
+  --mx-hover: rgba(28, 159, 224, 0.06);
+
+  /* Theme-independent on purpose: the matrix date band stays light in both. */
+  --band-date: #3D5FA8;
+
+  /* ─── Tier 3 · column palette (header / cell pairs) ──────────────────
+     Reproduces the "light 2 / light 3" tiers of a Google Sheets palette so
+     the matrix reads like the spreadsheet it replaces. */
+  --mx-col-purple-h: #D9D2E9;
+  --mx-col-purple-c: #EDE8F5;
+  --mx-col-grey-h: #D9D9D9;
+  --mx-col-grey-c: #EFEFEF;
+  --mx-col-yellow-h: #FFE599;
+  --mx-col-yellow-c: #FFF2CC;
+  --mx-col-green-h: #D9EAD3;
+  --mx-col-green-c: #EAF4E6;
+  --mx-col-cyan-h: #D0E0E3;
+  --mx-col-cyan-c: #E7EFF1;
+  --mx-col-orange-h: #FCE5CD;
+  --mx-col-orange-c: #FDF0E3;
+  --mx-col-blue-h: #CFE2F3;
+  --mx-col-blue-c: #E7F0FA;
+  --mx-col-magenta-h: #EAD1DC;
+  --mx-col-magenta-c: #F4E8EE;
+}
+
+.dark {
+  --page: #0A0E15;
+  --grid-line: #141B27;
+  --surface: #131A26;
+  --surface-2: #172030;
+  --surface-3: #1C2634;
+  --hover: #1B2532;
+
+  --border: #29354A;
+  --border-2: #232E40;
+  --border-3: #1E2836;
+  --border-strong: #3A4860;
+
+  --ink: #E8EDF6;
+  --ink-2: #D3DCEA;
+  --text-2: #B6C2D6;
+  --muted: #8EA1BA;
+  --muted-2: #7C8DA6;
+  --muted-3: #6B7C94;
+
+  --navy-text: #9DB4F0;
+  --brand-blue-deep: #2AAEEF;
+
+  --btn-ink: #1C9FE0;
+  --btn-ink-hover: #2AAEEF;
+  --active-tint: #16283A;
+
+  --pos: #35CE86;
+  --pos-surface: #102B1E;
+  --pos-border: #1F4A34;
+  --neg: #FF6B7A;
+  --neg-surface: #2C1418;
+  --neg-border: #4D2129;
+  --info: #6BA8F0;
+  --info-surface: #11203A;
+  --info-border: #21375C;
+  --warn: #F0B34A;
+  --warn-surface: #2B2010;
+  --warn-border: #4C3A1B;
+
+  --scrollbar: #2F3C52;
+  --scrollbar-hover: #3F5069;
+
+  /* Navy-anchored solids. Still fully opaque — see the constraint above. */
+  --mx-bg: #121A27;
+  --mx-alt: #16202F;
+  --mx-ink: #DCE4F0;
+  --mx-ink-2: #94A5BF;
+  --mx-line: #263349;
+  --mx-line-2: #1F2B3D;
+  --mx-head: #1B2637;
+  --mx-head-ink: #C7D4E6;
+  --mx-sticky: #121A27;
+  --mx-sticky-alt: #16202F;
+  --mx-pos: #35CE86;
+  --mx-neg: #FF6B7A;
+  --mx-hover: rgba(28, 159, 224, 0.10);
+
+  --mx-col-purple-h: #3A3350;
+  --mx-col-purple-c: #272238;
+  --mx-col-grey-h: #333B47;
+  --mx-col-grey-c: #242B35;
+  --mx-col-yellow-h: #4A3F22;
+  --mx-col-yellow-c: #332B16;
+  --mx-col-green-h: #23402C;
+  --mx-col-green-c: #182C1E;
+  --mx-col-cyan-h: #21383D;
+  --mx-col-cyan-c: #17272B;
+  --mx-col-orange-h: #4A3524;
+  --mx-col-orange-c: #332417;
+  --mx-col-blue-h: #22364F;
+  --mx-col-blue-c: #182538;
+  --mx-col-magenta-h: #432B36;
+  --mx-col-magenta-c: #2E1D25;
+}
+
+body {
+  font-family: var(--font-body);
+  background: var(--page);
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.font-display { font-family: var(--font-display); }
+.font-mono { font-family: var(--font-mono); }
+
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--scrollbar); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-hover); }
+
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes modalIn {
+  from { opacity: 0; transform: scale(0.96) translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes toastIn {
+  from { opacity: 0; transform: translateX(20px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes barRise {
+  from { transform: scaleY(0); }
+  to { transform: scaleY(1); }
+}
+
+.animate-fade-up { animation: fadeUp 0.25s ease-out both; }
+.animate-modal-in { animation: modalIn 0.18s ease-out both; }
+.animate-toast-in { animation: toastIn 0.2s ease-out both; }
+.animate-bar-rise { animation: barRise 0.4s ease-out both; transform-origin: bottom; }
+
+/* Dark text on light surfaces: recolour plus a halo. */
+.text-glow:hover {
+  color: var(--brand-blue);
+  text-shadow: 0 0 6px rgba(28, 159, 224, 0.55), 0 0 2px rgba(28, 159, 224, 0.45);
+}
+/* Light text on navy: halo only, so the text stays white. */
+.text-glow-light:hover {
+  text-shadow: 0 0 8px rgba(127, 212, 245, 0.85), 0 0 3px rgba(255, 255, 255, 0.6);
+}
+
+.brand-gradient {
+  background: linear-gradient(90deg, #1e2a6e 0%, #1c9fe0 100%);
+}
