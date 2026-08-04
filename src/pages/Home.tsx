@@ -3,6 +3,7 @@ import { Link, useOutletContext } from 'react-router-dom'
 import type { HzOutletContext, RankingRecord, Snapshot, TierCounts } from '../types'
 import { GROUPS, OTHER_GROUP, groupForKeyword, groupSlug } from '../lib/groups'
 import { avgPosition, computeTiers, parsePosition } from '../lib/normalize'
+import { LoadError } from '../components/LoadError'
 
 const MOVER_LIMIT = 10
 
@@ -14,6 +15,11 @@ export function Home() {
   const tiers = useMemo(() => computeTiers(active?.records ?? []), [active])
   const movers = useMemo(() => computeMovers(active, previous), [active, previous])
   const leaderboard = useMemo(() => computeLeaderboard(ctx.snapshots), [ctx.snapshots])
+
+  // A failed load must never render as an empty dataset.
+  if (ctx.snapshotsError) {
+    return <LoadError message={ctx.snapshotsError} onRetry={ctx.onReloadSnapshots} />
+  }
 
   if (!active) {
     return (

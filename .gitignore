@@ -5,3 +5,5 @@ dist/
 *.tsbuildinfo
 .vercel/
 .DS_Store
+.playwright-mcp/
+*.png

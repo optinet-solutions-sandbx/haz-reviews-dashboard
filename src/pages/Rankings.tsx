@@ -4,6 +4,7 @@ import { Link, Navigate, useOutletContext, useParams } from 'react-router-dom'
 import type { HzOutletContext, KeywordGroup, RankingRecord, Snapshot } from '../types'
 import { GROUPS, GROUP_BY_SLUG, OTHER_GROUP, groupForKeyword, groupSlug, orderMarkets } from '../lib/groups'
 import { avgPosition, computeStats, effectiveDelta, parsePosition } from '../lib/normalize'
+import { LoadError } from '../components/LoadError'
 import { RankingMatrix } from '../components/RankingMatrix'
 import { SnapshotTabs } from '../components/SnapshotTabs'
 import { StatsRow, type StatKey } from '../components/StatsRow'
@@ -11,6 +12,11 @@ import { StatsRow, type StatKey } from '../components/StatsRow'
 export function Rankings() {
   const ctx = useOutletContext<HzOutletContext>()
   const { groupSlug: slug } = useParams<{ groupSlug: string }>()
+
+  // A failed load must never render as an empty dataset.
+  if (ctx.snapshotsError) {
+    return <LoadError message={ctx.snapshotsError} onRetry={ctx.onReloadSnapshots} />
+  }
 
   if (!slug) return <GroupGrid ctx={ctx} />
 

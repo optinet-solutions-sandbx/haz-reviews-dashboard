@@ -141,6 +141,9 @@ function Layout() {
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const [loadingOlder, setLoadingOlder] = useState(false)
   const [loadOlderError, setLoadOlderError] = useState<string | null>(null)
+  const [snapshotsError, setSnapshotsError] = useState<string | null>(null)
+  /** Bumped to re-run the initial load without a full page reload. */
+  const [reloadToken, setReloadToken] = useState(0)
 
   const addToast = useCallback((message: string, type: ToastItem['type'] = 'success') => {
     const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
@@ -158,6 +161,8 @@ function Layout() {
 
   useEffect(() => {
     let active = true
+    setLoading(true)
+    setSnapshotsError(null)
     loadRecentSnapshots(DEFAULT_RECENT)
       .then(({ meta, snapshots }) => {
         if (!active) return
@@ -165,7 +170,12 @@ function Layout() {
       })
       .catch((err: unknown) => {
         if (!active) return
-        addToast(err instanceof Error ? err.message : String(err), 'error')
+        const message = err instanceof Error ? err.message : String(err)
+        // Recorded in state as well as toasted. A toast auto-dismisses, and a
+        // dismissed toast would leave the empty state claiming there is no data
+        // when the truth is that we could not reach the database.
+        setSnapshotsError(message)
+        addToast(message, 'error')
       })
       .finally(() => {
         if (active) setLoading(false)
@@ -173,7 +183,7 @@ function Layout() {
     return () => {
       active = false
     }
-  }, [addToast])
+  }, [addToast, reloadToken])
 
   // ─── Derived view ─────────────────────────────────────────────────────────
 
@@ -402,6 +412,8 @@ function Layout() {
       isAdmin: auth.isAdmin,
       accessLoading: auth.accessLoading,
       snapshotsLoading: loading,
+      snapshotsError,
+      onReloadSnapshots: () => setReloadToken((t) => t + 1),
       loadingOlderSnapshots: loadingOlder,
       loadOlderError,
     }),
@@ -420,6 +432,7 @@ function Layout() {
       auth.accessLoading,
       writeGate,
       loading,
+      snapshotsError,
       loadingOlder,
       loadOlderError,
     ],

@@ -203,6 +203,13 @@ export interface HzOutletContext {
   isAdmin: boolean
   accessLoading: boolean
   snapshotsLoading: boolean
+  /**
+   * Set when the initial load FAILED, as opposed to succeeding with no rows.
+   * Pages must distinguish the two: rendering "no data yet" for an unreachable
+   * database tells the user their dataset is empty when it is not.
+   */
+  snapshotsError: string | null
+  onReloadSnapshots: () => void
   loadingOlderSnapshots: boolean
   loadOlderError: string | null
 }
