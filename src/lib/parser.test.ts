@@ -1,6 +1,7 @@
 import * as XLSX from 'xlsx'
 import { describe, expect, it } from 'vitest'
-import { parseRows, parseSheet, snapshotIdFor, withSnapshotDate } from './parser'
+import { parseRows, snapshotIdFor, withSnapshotDate } from './parser'
+import { parseSheet } from './readWorkbook'
 
 const HEADER = [
   'Keyword',

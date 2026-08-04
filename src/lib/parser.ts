@@ -1,4 +1,3 @@
-import * as XLSX from 'xlsx'
 import type { ParseResult, RankingRecord } from '../types'
 import { formatDisplayDate, normalizeDateValue, toIsoLocal } from './dates'
 import { MARKET_ORDER, OTHER_GROUP, groupForKeyword } from './groups'
@@ -178,19 +177,6 @@ export function parseRows(rows: unknown[][]): ParseResult {
     unknownMarkets,
     detectedDate,
   }
-}
-
-/** Reads the first sheet of a workbook (or CSV) and delegates to parseRows. */
-export function parseSheet(buffer: ArrayBuffer): ParseResult {
-  const wb = XLSX.read(buffer, { type: 'array', cellDates: true })
-  const sheetName = wb.SheetNames[0]
-  if (!sheetName) throw new Error('The file contains no sheets.')
-  const rows = XLSX.utils.sheet_to_json<unknown[]>(wb.Sheets[sheetName], {
-    header: 1,
-    raw: true,
-    defval: '',
-  })
-  return parseRows(rows)
 }
 
 /**
