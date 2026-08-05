@@ -6,7 +6,8 @@
 -- ─── Snapshots ──────────────────────────────────────────────────────────────
 
 create table if not exists public.snapshots (
-  id            text primary key,   -- 'snap-<raw_date>', client-generated
+  id            text primary key,   -- 'snap-<site>-<raw_date>', client-generated
+  site          text not null default 'hazreviews',  -- a site id from lib/sites.ts
   raw_date      text not null,      -- 'YYYY-MM-DD'
   display_date  text not null,      -- re-derived on read; never trusted
   created_at    timestamptz not null default now()
@@ -17,6 +18,11 @@ create table if not exists public.snapshots (
 -- snapshot as "latest".
 create index if not exists snapshots_raw_date_idx
   on public.snapshots (raw_date desc);
+
+-- Serves the per-site recent window in storage.ts — each property gets its own
+-- newest-N, so a busy site cannot starve a quiet one.
+create index if not exists snapshots_site_raw_date_idx
+  on public.snapshots (site, raw_date desc);
 
 create table if not exists public.ranking_records (
   id            bigserial primary key,

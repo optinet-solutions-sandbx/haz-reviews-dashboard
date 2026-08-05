@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import type { RankingRecord } from '../types'
-import { PAGE, dedupeRecords, pageRanges, toSnapshotMeta } from './storage'
+import type { RankingRecord, SnapshotMeta } from '../types'
+import { PAGE, dedupeRecords, pageRanges, recentPerSite, toSnapshotMeta } from './storage'
 
 function rec(partial: Partial<RankingRecord>): RankingRecord {
   return {
@@ -42,12 +42,67 @@ describe('pageRanges', () => {
 
 describe('toSnapshotMeta', () => {
   it('re-derives displayDate rather than trusting the stored column', () => {
-    const meta = toSnapshotMeta({ id: 'snap-2026-08-04', raw_date: '2026-08-04' })
+    const meta = toSnapshotMeta({
+      id: 'snap-hazreviews-2026-08-04',
+      site: 'hazreviews',
+      raw_date: '2026-08-04',
+    })
     expect(meta).toEqual({
-      id: 'snap-2026-08-04',
+      id: 'snap-hazreviews-2026-08-04',
+      site: 'hazreviews',
       rawDate: '2026-08-04',
       displayDate: '4 Aug 26',
     })
+  })
+
+  // Rows written before the site migration have a null site. They are all
+  // HAZREVIEWS data, and must not read as a site the registry does not know.
+  it('defaults a null site to hazreviews', () => {
+    expect(
+      toSnapshotMeta({ id: 'snap-2026-08-01', site: null, raw_date: '2026-08-01' }).site,
+    ).toBe('hazreviews')
+  })
+})
+
+describe('recentPerSite', () => {
+  const meta = (site: string, rawDate: string): SnapshotMeta => ({
+    id: `snap-${site}-${rawDate}`,
+    site,
+    rawDate,
+    displayDate: rawDate,
+  })
+
+  // The bug this exists to prevent: eight consecutive HAZREVIEWS uploads would
+  // consume the whole window, so Kuwait hydrated zero records and its page
+  // rendered as "no data yet" rather than as unloaded.
+  it('gives every site its own window', () => {
+    const all = [
+      ...Array.from({ length: 8 }, (_, i) => meta('hazreviews', `2026-08-0${8 - i}`)),
+      meta('onlinecasinokuwait', '2026-07-01'),
+    ]
+    const picked = recentPerSite(all, 8)
+    expect(picked.filter((m) => m.site === 'onlinecasinokuwait')).toHaveLength(1)
+    expect(picked.filter((m) => m.site === 'hazreviews')).toHaveLength(8)
+  })
+
+  it('caps each site independently', () => {
+    const all = [
+      meta('hazreviews', '2026-08-03'),
+      meta('hazreviews', '2026-08-02'),
+      meta('hazreviews', '2026-08-01'),
+      meta('onlinecasinokuwait', '2026-08-03'),
+      meta('onlinecasinokuwait', '2026-08-02'),
+    ]
+    const picked = recentPerSite(all, 2)
+    expect(picked).toHaveLength(4)
+    expect(picked.filter((m) => m.site === 'hazreviews').map((m) => m.rawDate)).toEqual([
+      '2026-08-03',
+      '2026-08-02',
+    ])
+  })
+
+  it('returns an empty list for empty input', () => {
+    expect(recentPerSite([], 8)).toEqual([])
   })
 })
 

@@ -6,6 +6,7 @@ import type {
   SnapshotMeta,
 } from '../types'
 import { formatDisplayDate } from './dates'
+import { DEFAULT_SITE_ID } from './sites'
 import { supabase } from './supabase'
 
 /** ~2 months at a weekly cadence — enough history to read movement without
@@ -41,12 +42,37 @@ interface RecordRow {
  * rows written under an older format still render in the current one. Store the
  * derived value, but never trust it on read.
  */
-export function toSnapshotMeta(row: { id: string; raw_date: string }): SnapshotMeta {
+export function toSnapshotMeta(row: {
+  id: string
+  site: string | null
+  raw_date: string
+}): SnapshotMeta {
   return {
     id: row.id,
+    // Null means the row predates the site column. Everything stored before the
+    // migration is HAZREVIEWS data.
+    site: row.site ?? DEFAULT_SITE_ID,
     rawDate: row.raw_date,
     displayDate: formatDisplayDate(row.raw_date),
   }
+}
+
+/**
+ * The newest `perSite` snapshots FOR EACH site, preserving the input's
+ * newest-first ordering.
+ *
+ * Slicing the merged list instead would let a busy property starve a quiet one:
+ * eight consecutive HAZREVIEWS uploads would consume the entire window and
+ * Kuwait would hydrate nothing, rendering as "no data yet" when it has data.
+ */
+export function recentPerSite(meta: SnapshotMeta[], perSite: number): SnapshotMeta[] {
+  const seen = new Map<string, number>()
+  return meta.filter((m) => {
+    const n = seen.get(m.site) ?? 0
+    if (n >= perSite) return false
+    seen.set(m.site, n + 1)
+    return true
+  })
 }
 
 function toRecord(row: RecordRow): RankingRecord {
@@ -108,7 +134,7 @@ function fail(context: string, error: { message: string } | null): void {
 export async function loadSnapshotMeta(): Promise<SnapshotMeta[]> {
   const { data, error } = await supabase
     .from('snapshots')
-    .select('id, raw_date')
+    .select('id, site, raw_date')
     // raw_date first: a backfill writes newest-first, so created_at desc alone
     // would report the oldest snapshot as the latest.
     .order('raw_date', { ascending: false })
@@ -170,7 +196,7 @@ export async function loadRecentSnapshots(
   recentCount: number = DEFAULT_RECENT,
 ): Promise<{ meta: SnapshotMeta[]; snapshots: Snapshot[] }> {
   const meta = await loadSnapshotMeta()
-  const recent = meta.slice(0, recentCount)
+  const recent = recentPerSite(meta, recentCount)
   const records = await loadSnapshotRecords(recent.map((m) => m.id))
   return {
     meta,
@@ -210,6 +236,7 @@ export async function upsertSnapshot(snapshot: Snapshot): Promise<void> {
 
   const insSnap = await supabase.from('snapshots').insert({
     id: snapshot.id,
+    site: snapshot.site,
     raw_date: snapshot.rawDate,
     display_date: snapshot.displayDate,
   })
