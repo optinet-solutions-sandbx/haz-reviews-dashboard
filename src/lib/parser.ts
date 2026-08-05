@@ -1,6 +1,7 @@
 import type { ParseResult, RankingRecord } from '../types'
 import { formatDisplayDate, normalizeDateValue, toIsoLocal } from './dates'
 import { MARKET_ORDER, OTHER_GROUP, groupForKeyword } from './groups'
+import { DEFAULT_SITE_ID } from './sites'
 
 const HEADER_SCAN_ROWS = 5
 
@@ -21,8 +22,13 @@ const COLUMNS = {
 
 type ColumnKey = keyof typeof COLUMNS
 
-export function snapshotIdFor(rawDate: string): string {
-  return `snap-${rawDate}`
+/**
+ * Deterministic and site-scoped, which is what makes re-upload an idempotent
+ * replace instead of a duplicate — and what stops two properties sharing a date
+ * from overwriting each other.
+ */
+export function snapshotIdFor(siteId: string, rawDate: string): string {
+  return `snap-${siteId}-${rawDate}`
 }
 
 function cell(row: unknown[], index: number): string {
@@ -105,7 +111,7 @@ function modal(values: string[]): string {
  * Split from parseSheet so it is testable without building a workbook, which is
  * where every interesting edge case lives.
  */
-export function parseRows(rows: unknown[][]): ParseResult {
+export function parseRows(rows: unknown[][], siteId: string = DEFAULT_SITE_ID): ParseResult {
   const headerIndex = findHeaderRow(rows)
   if (headerIndex < 0) {
     throw new Error(
@@ -166,7 +172,8 @@ export function parseRows(rows: unknown[][]): ParseResult {
 
   return {
     snapshot: {
-      id: snapshotIdFor(detectedDate),
+      id: snapshotIdFor(siteId, detectedDate),
+      site: siteId,
       rawDate: detectedDate,
       displayDate: formatDisplayDate(detectedDate),
       records,
@@ -191,7 +198,7 @@ export function withSnapshotDate(result: ParseResult, rawDate: string): ParseRes
     detectedDate: rawDate,
     snapshot: {
       ...result.snapshot,
-      id: snapshotIdFor(rawDate),
+      id: snapshotIdFor(result.snapshot.site, rawDate),
       rawDate,
       displayDate: formatDisplayDate(rawDate),
     },

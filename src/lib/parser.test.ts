@@ -16,7 +16,43 @@ const HEADER = [
 
 describe('snapshotIdFor', () => {
   it('is deterministic so a re-upload replaces rather than duplicates', () => {
-    expect(snapshotIdFor('2026-08-04')).toBe('snap-2026-08-04')
+    expect(snapshotIdFor('hazreviews', '2026-08-04')).toBe('snap-hazreviews-2026-08-04')
+  })
+
+  // Without site scoping the two properties collide on any shared date and the
+  // second upload silently replaces the first.
+  it('separates the same date on different sites', () => {
+    expect(snapshotIdFor('hazreviews', '2026-08-04')).not.toBe(
+      snapshotIdFor('onlinecasinokuwait', '2026-08-04'),
+    )
+  })
+})
+
+describe('site scoping', () => {
+  const ROWS: unknown[][] = [
+    HEADER,
+    ['rabona casino', 'KW', '4', '6', '+2', 'https://x/y', '1.2K', '2026-08-05'],
+  ]
+
+  it('stamps the snapshot with the requested site', () => {
+    expect(parseRows(ROWS, 'onlinecasinokuwait').snapshot.site).toBe('onlinecasinokuwait')
+  })
+
+  it('defaults to hazreviews when no site is given', () => {
+    expect(parseRows(ROWS).snapshot.site).toBe('hazreviews')
+  })
+
+  it('gives the same date on different sites different ids', () => {
+    expect(parseRows(ROWS, 'hazreviews').snapshot.id).toBe('snap-hazreviews-2026-08-05')
+    expect(parseRows(ROWS, 'onlinecasinokuwait').snapshot.id).toBe(
+      'snap-onlinecasinokuwait-2026-08-05',
+    )
+  })
+
+  it('keeps the site when the date is overridden', () => {
+    const result = withSnapshotDate(parseRows(ROWS, 'onlinecasinokuwait'), '2026-07-01')
+    expect(result.snapshot.site).toBe('onlinecasinokuwait')
+    expect(result.snapshot.id).toBe('snap-onlinecasinokuwait-2026-07-01')
   })
 })
 
@@ -46,7 +82,7 @@ describe('parseRows', () => {
       urlFound: 'https://hazreviews.com/crypto',
     })
     expect(r.snapshot.rawDate).toBe('2026-08-04')
-    expect(r.snapshot.id).toBe('snap-2026-08-04')
+    expect(r.snapshot.id).toBe('snap-hazreviews-2026-08-04')
     expect(r.snapshot.displayDate).toBe('4 Aug 26')
   })
 
@@ -192,7 +228,7 @@ describe('withSnapshotDate', () => {
     // overwrite a different day's data.
     const parsed = parseRows([HEADER, ['k', 'AE', '1', '', '', '', '', '2026-08-04']])
     const moved = withSnapshotDate(parsed, '2026-07-28')
-    expect(moved.snapshot.id).toBe('snap-2026-07-28')
+    expect(moved.snapshot.id).toBe('snap-hazreviews-2026-07-28')
     expect(moved.snapshot.rawDate).toBe('2026-07-28')
     expect(moved.snapshot.displayDate).toBe('28 Jul 26')
     expect(moved.detectedDate).toBe('2026-07-28')

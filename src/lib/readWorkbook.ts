@@ -1,6 +1,7 @@
 import * as XLSX from 'xlsx'
 import type { ParseResult } from '../types'
 import { parseRows } from './parser'
+import { DEFAULT_SITE_ID } from './sites'
 
 /**
  * Reads the first sheet of a workbook (or CSV) and delegates to parseRows.
@@ -10,7 +11,10 @@ import { parseRows } from './parser'
  * modal — so a user who never imports a file never downloads a spreadsheet
  * parser. Keep the pure row logic in parser.ts free of this dependency.
  */
-export function parseSheet(buffer: ArrayBuffer): ParseResult {
+export function parseSheet(
+  buffer: ArrayBuffer,
+  siteId: string = DEFAULT_SITE_ID,
+): ParseResult {
   const wb = XLSX.read(buffer, { type: 'array', cellDates: true })
   const sheetName = wb.SheetNames[0]
   if (!sheetName) throw new Error('The file contains no sheets.')
@@ -19,5 +23,5 @@ export function parseSheet(buffer: ArrayBuffer): ParseResult {
     raw: true,
     defval: '',
   })
-  return parseRows(rows)
+  return parseRows(rows, siteId)
 }
