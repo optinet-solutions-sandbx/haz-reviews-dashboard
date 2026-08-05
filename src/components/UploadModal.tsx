@@ -2,8 +2,11 @@ import { FileSpreadsheet, Upload, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import type { ParseResult } from '../types'
 import { withSnapshotDate } from '../lib/parser'
+import { SITES } from '../lib/sites'
 
 interface UploadModalProps {
+  /** The property being viewed — almost always the one being uploaded for. */
+  defaultSiteId: string
   onClose: () => void
   onConfirm: (result: ParseResult) => void
 }
@@ -15,7 +18,8 @@ interface UploadModalProps {
  * open, and a notification that disappears behind it is a notification the user
  * never reads.
  */
-export function UploadModal({ onClose, onConfirm }: UploadModalProps) {
+export function UploadModal({ defaultSiteId, onClose, onConfirm }: UploadModalProps) {
+  const [siteId, setSiteId] = useState(defaultSiteId)
   const [parsed, setParsed] = useState<ParseResult | null>(null)
   const [dateOverride, setDateOverride] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -41,7 +45,7 @@ export function UploadModal({ onClose, onConfirm }: UploadModalProps) {
         import('../lib/readWorkbook'),
         file.arrayBuffer(),
       ])
-      const result = parseSheet(buffer)
+      const result = parseSheet(buffer, siteId)
       setParsed(result)
       setDateOverride(result.detectedDate)
     } catch (err) {
@@ -86,6 +90,53 @@ export function UploadModal({ onClose, onConfirm }: UploadModalProps) {
           <button type="button" onClick={onClose} aria-label="Close" style={{ color: 'var(--muted)' }}>
             <X size={16} />
           </button>
+        </div>
+
+        {/* Chosen before a file is picked, because the target determines the
+            snapshot id the parse produces. */}
+        <div className="pb-4">
+          <div
+            className="pb-1.5 text-[9px] font-semibold uppercase tracking-[0.1em]"
+            style={{ color: 'var(--muted)' }}
+          >
+            Import into
+          </div>
+          <div className="flex gap-2">
+            {SITES.map((site) => {
+              const selected = site.id === siteId
+              return (
+                <button
+                  key={site.id}
+                  type="button"
+                  onClick={() => {
+                    if (selected) return
+                    setSiteId(site.id)
+                    // A file parsed for the other property is stale: its
+                    // snapshot already carries the old site id, so importing it
+                    // now would file the data under the wrong property with
+                    // nothing on screen to reveal it.
+                    setParsed(null)
+                    setError(null)
+                    setDateOverride('')
+                  }}
+                  className="flex flex-1 items-center gap-2 rounded-lg px-3 py-2 text-[12px] transition-colors"
+                  style={{
+                    border: `1px solid ${selected ? site.color : 'var(--border)'}`,
+                    background: selected ? 'var(--active-tint)' : 'transparent',
+                    color: selected ? 'var(--ink)' : 'var(--text-2)',
+                    fontWeight: selected ? 600 : 400,
+                  }}
+                >
+                  <span
+                    className="h-2.5 w-2.5 shrink-0 rounded-full"
+                    style={{ background: site.color }}
+                    aria-hidden
+                  />
+                  <span className="truncate">{site.name}</span>
+                </button>
+              )
+            })}
+          </div>
         </div>
 
         {!parsed && (

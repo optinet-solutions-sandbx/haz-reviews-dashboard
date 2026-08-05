@@ -567,7 +567,11 @@ function Layout() {
       </div>
 
       {showUpload && (
-        <UploadModal onClose={() => setShowUpload(false)} onConfirm={handleUploadConfirm} />
+        <UploadModal
+          defaultSiteId={activeSite.id}
+          onClose={() => setShowUpload(false)}
+          onConfirm={handleUploadConfirm}
+        />
       )}
       {duplicateWarning && (
         <DuplicateWarning
