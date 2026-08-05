@@ -541,6 +541,7 @@ function Layout() {
         onCloseMobile={() => setMobileNavOpen(false)}
         isAdmin={auth.isAdmin}
         groups={groupsWithData}
+        activeSite={activeSite}
         lastUpdated={latestDate}
         writeGate={writeGate}
         onOpenUpload={handleOpenUpload}

@@ -12,15 +12,23 @@ import { useEffect } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import type { KeywordGroup, WriteGate } from '../types'
 import { groupSlug } from '../lib/groups'
+import { SITES, type Site } from '../lib/sites'
 
+/** Paths are suffixes. Site pages hang off the active property's slug; the two
+ *  `global` pages are not scoped to a property and live at the root. */
 const PAGES = [
-  { path: '/', label: 'Overview', icon: LayoutDashboard },
-  { path: '/rankings', label: 'Rankings', icon: TrendingUp },
-  { path: '/log', label: 'Activity', icon: History },
-  { path: '/how-it-works', label: 'How it works', icon: HelpCircle },
+  { path: '', label: 'Overview', icon: LayoutDashboard, global: false },
+  { path: 'rankings', label: 'Rankings', icon: TrendingUp, global: false },
+  { path: 'log', label: 'Activity', icon: History, global: true },
+  { path: 'how-it-works', label: 'How it works', icon: HelpCircle, global: true },
 ] as const
 
-const ADMIN_PAGE = { path: '/admin/users', label: 'Users', icon: Users } as const
+const ADMIN_PAGE = { path: 'admin/users', label: 'Users', icon: Users, global: true } as const
+
+function hrefFor(page: { path: string; global: boolean }, site: Site): string {
+  if (page.global) return `/${page.path}`
+  return page.path ? `/${site.slug}/${page.path}` : `/${site.slug}`
+}
 
 export const SIDEBAR_KEY = 'hz_sidebar_expanded'
 
@@ -48,6 +56,7 @@ interface SidebarProps {
   onCloseMobile: () => void
   isAdmin: boolean
   groups: KeywordGroup[]
+  activeSite: Site
   lastUpdated: string | null
   writeGate: WriteGate
   onOpenUpload: () => void
@@ -130,6 +139,7 @@ function SidebarBody({
   expanded,
   isAdmin,
   groups,
+  activeSite,
   lastUpdated,
   writeGate,
   onOpenUpload,
@@ -139,8 +149,11 @@ function SidebarBody({
 
   // The active group comes from the URL, not from local state, so a shared link
   // highlights the right row and back/forward always stay in sync.
-  const inRankings = location.pathname.startsWith('/rankings')
-  const activeSlug = inRankings ? location.pathname.split('/')[2] : undefined
+  //
+  // The path is '/<site>/rankings/<group>', so 'rankings' is no longer the first
+  // segment and the group slug sits at index 3.
+  const inRankings = location.pathname.includes('/rankings')
+  const activeSlug = inRankings ? location.pathname.split('/')[3] : undefined
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -169,14 +182,66 @@ function SidebarBody({
         </div>
       </div>
 
+      {/* Property switcher. A link per site rather than a select: with two
+          options a dropdown costs an extra click and hides the alternative. */}
+      <div className={expanded ? 'mb-3 px-3' : 'mb-3 px-2'}>
+        {expanded && (
+          <div
+            className="mb-1.5 text-[9px] font-semibold uppercase tracking-[0.14em]"
+            style={{ color: 'var(--muted-3)' }}
+          >
+            Property
+          </div>
+        )}
+        <div className="flex flex-col gap-1">
+          {SITES.map((site) => {
+            const active = site.id === activeSite.id
+            return (
+              <Link
+                key={site.id}
+                to={`/${site.slug}`}
+                title={expanded ? undefined : site.name}
+                className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-[12px] transition-colors"
+                style={{
+                  background: active ? 'var(--active-tint)' : undefined,
+                  color: active ? 'var(--navy-text)' : 'var(--text-2)',
+                  fontWeight: active ? 600 : 400,
+                }}
+              >
+                <span
+                  className="h-2.5 w-2.5 shrink-0 rounded-full"
+                  style={{ background: site.color }}
+                  aria-hidden
+                />
+                <span
+                  className={`truncate transition-opacity duration-150 ${
+                    expanded ? 'opacity-100' : 'opacity-0'
+                  }`}
+                >
+                  {site.name}
+                </span>
+              </Link>
+            )
+          })}
+        </div>
+      </div>
+
       {/* Nav */}
       <nav className="flex flex-col gap-0.5 px-2">
-        {pages.map(({ path, label, icon: Icon }) => {
-          const active = path === '/' ? location.pathname === '/' : location.pathname.startsWith(path)
+        {pages.map((page) => {
+          const { label, icon: Icon } = page
+          const href = hrefFor(page, activeSite)
+          // Overview is an exact match; everything else is a prefix, so
+          // /kuwait/rankings/rabona still lights up Rankings. A prefix test on
+          // Overview would match every site page and light up both rows.
+          const active =
+            href === `/${activeSite.slug}`
+              ? location.pathname === href
+              : location.pathname.startsWith(href)
           return (
             <Link
-              key={path}
-              to={path}
+              key={href}
+              to={href}
               title={expanded ? undefined : label}
               className="flex items-center gap-2.5 rounded-lg py-2 text-[12px] font-medium transition-colors"
               style={
@@ -225,7 +290,7 @@ function SidebarBody({
               return (
                 <Link
                   key={g.name}
-                  to={`/rankings/${slug}`}
+                  to={`/${activeSite.slug}/rankings/${slug}`}
                   className="flex items-center gap-2 rounded-md py-1.5 pl-2 pr-2 text-[11px] transition-colors"
                   style={{
                     background: active ? 'var(--active-tint)' : undefined,
