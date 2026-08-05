@@ -17,18 +17,27 @@ function recordKey(r: RankingRecord): string {
  *    values, so the fill-only-if-empty rule would skip them and later edits
  *    would stop propagating.
  */
-export function applyCarryForward<T extends { rawDate: string; records: RankingRecord[] }>(
-  snapshots: T[],
-): T[] {
+export function applyCarryForward<
+  T extends { site: string; rawDate: string; records: RankingRecord[] },
+>(snapshots: T[]): T[] {
   if (snapshots.length === 0) return []
 
   // Oldest → newest for the walk, without disturbing the caller's order.
   const ascending = [...snapshots].sort((a, b) => a.rawDate.localeCompare(b.rawDate))
 
-  const volumes = new Map<string, string>()
+  // One map PER SITE. A single shared map would inherit a HAZREVIEWS volume onto
+  // an identically-named Kuwait keyword — a wrong number that looks entirely
+  // plausible on screen.
+  const volumesBySite = new Map<string, Map<string, string>>()
   const filledByIndex = new Map<T, RankingRecord[]>()
 
   for (const snapshot of ascending) {
+    let volumes = volumesBySite.get(snapshot.site)
+    if (!volumes) {
+      volumes = new Map<string, string>()
+      volumesBySite.set(snapshot.site, volumes)
+    }
+
     const records = snapshot.records.map((r) => {
       const k = recordKey(r)
 
@@ -43,8 +52,8 @@ export function applyCarryForward<T extends { rawDate: string; records: RankingR
       return inherited ? { ...r, searchVolume: inherited } : r
     })
 
-    // Keyed by object identity: T is only constrained to { rawDate, records },
-    // so there is no id field to rely on and two snapshots could share a date.
+    // Keyed by object identity: T carries no id, and two snapshots on different
+    // sites can share a date, so there is no value-based key guaranteed unique.
     filledByIndex.set(snapshot, records)
   }
 

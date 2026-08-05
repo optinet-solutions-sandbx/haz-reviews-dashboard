@@ -15,8 +15,8 @@ function rec(keyword: string, market: string, searchVolume = ''): RankingRecord 
   }
 }
 
-function snap(rawDate: string, records: RankingRecord[]) {
-  return { id: `snap-${rawDate}`, rawDate, displayDate: rawDate, records }
+function snap(rawDate: string, records: RankingRecord[], site = 'hazreviews') {
+  return { id: `snap-${site}-${rawDate}`, site, rawDate, displayDate: rawDate, records }
 }
 
 describe('applyCarryForward', () => {
@@ -79,5 +79,24 @@ describe('applyCarryForward', () => {
 
   it('handles an empty list', () => {
     expect(applyCarryForward([])).toEqual([])
+  })
+
+  // A HAZREVIEWS volume inherited onto an identically-named Kuwait keyword is a
+  // wrong number that looks entirely plausible on screen — nothing in the UI
+  // would reveal that it came from the other property.
+  it('never carries a volume across sites', () => {
+    const out = applyCarryForward([
+      snap('2026-08-01', [rec('rabona casino', 'KW', '9.9K')], 'hazreviews'),
+      snap('2026-08-02', [rec('rabona casino', 'KW', '')], 'onlinecasinokuwait'),
+    ])
+    expect(out.find((s) => s.site === 'onlinecasinokuwait')!.records[0].searchVolume).toBe('')
+  })
+
+  it('still carries forward within one site', () => {
+    const out = applyCarryForward([
+      snap('2026-08-01', [rec('rabona casino', 'KW', '9.9K')], 'onlinecasinokuwait'),
+      snap('2026-08-02', [rec('rabona casino', 'KW', '')], 'onlinecasinokuwait'),
+    ])
+    expect(out.find((s) => s.rawDate === '2026-08-02')!.records[0].searchVolume).toBe('9.9K')
   })
 })
