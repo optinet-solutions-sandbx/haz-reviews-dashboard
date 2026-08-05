@@ -1,8 +1,10 @@
 # Haz Reviews Dashboard
 
-Internal dashboard tracking Google keyword rankings for
-[hazreviews.com](https://hazreviews.com) — an affiliate site publishing independent
-online-casino reviews.
+Internal dashboard tracking Google keyword rankings for two affiliate properties
+publishing independent online-casino reviews:
+[hazreviews.com](https://hazreviews.com) and
+[onlinecasinokuwait.com](https://onlinecasinokuwait.com). One deployed link covers
+both; the sidebar switches between them and the URL carries the selection.
 
 A ranking export is dropped in, parsed in the browser, and stored as an immutable
 dated **snapshot**. The dashboard renders it as a spreadsheet-fidelity matrix with
@@ -11,6 +13,8 @@ access.
 
 - **Spec:** [docs/superpowers/specs/2026-08-04-haz-reviews-dashboard-design.md](docs/superpowers/specs/2026-08-04-haz-reviews-dashboard-design.md)
 - **Plan:** [docs/superpowers/plans/2026-08-04-haz-reviews-dashboard.md](docs/superpowers/plans/2026-08-04-haz-reviews-dashboard.md)
+- **Second property (spec):** [docs/superpowers/specs/2026-08-05-second-site-onlinecasinokuwait-design.md](docs/superpowers/specs/2026-08-05-second-site-onlinecasinokuwait-design.md)
+- **Second property (plan):** [docs/superpowers/plans/2026-08-05-second-site-onlinecasinokuwait.md](docs/superpowers/plans/2026-08-05-second-site-onlinecasinokuwait.md)
 
 Visual system and app shell are shared with the sibling `Ranking-Reports` and
 `BIF-Dashboard` projects.
@@ -22,7 +26,7 @@ npm install       # .npmrc sets legacy-peer-deps
 npm run dev       # Vite dev server on http://localhost:3002 (strictPort)
 npm run build     # tsc -b (two projects) && vite build
 npm run preview   # preview the production build
-npm test          # vitest run  — 98 tests
+npm test          # vitest run  — 115 tests
 npm run test:watch
 ```
 
@@ -56,6 +60,13 @@ In the Supabase SQL editor, run in this order:
 
 Both files are idempotent and safe to re-run.
 
+**Upgrading an existing database to the two-property version:** run
+`supabase/add-site-column.sql` once, before deploying. It adds `snapshots.site`,
+backfills every existing row to `hazreviews`, and rewrites snapshot ids from
+`snap-<date>` to `snap-hazreviews-<date>`. Databases created from the current
+`setup.sql` already have the column and must skip it. The script is idempotent —
+a second run is a no-op.
+
 ### 3. Seed the first admin
 
 Sign up through the app once, then:
@@ -85,9 +96,14 @@ a confirmation.
 
 ## Adding a keyword group
 
-HazReviews is a single site, so there is no brand→domain registry. Keywords are
+Each property is one domain, so there is no brand→domain registry. Keywords are
 grouped instead, and **group membership is derived, never stored** — so improving
 the registry re-groups the whole history retroactively, with no backfill.
+
+The registry is **shared across both properties**. Because membership is derived,
+a shared list self-filters: a group with no matching keywords on the active
+property simply does not render. That keeps a brand appearing on both sites
+consistent in colour and aliases, with one place to fix a matching bug.
 
 Add one entry to `GROUPS` in [src/lib/groups.ts](src/lib/groups.ts):
 

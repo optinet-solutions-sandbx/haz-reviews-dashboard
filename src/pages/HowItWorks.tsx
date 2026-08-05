@@ -1,5 +1,18 @@
 const SECTIONS: Array<{ title: string; body: React.ReactNode }> = [
   {
+    title: 'Two properties, one dashboard',
+    body: (
+      <>
+        Use the property switcher at the top of the sidebar to move between
+        <strong> HAZREVIEWS</strong> and <strong>OnlineCasinoKuwait</strong>. The address bar
+        changes with it, so a link you copy points at the property you were looking at. Imports,
+        snapshots, date selections and search volumes are kept entirely separate per property —
+        nothing carries across. Keyword groups are the one shared thing, so a casino brand
+        appearing on both sites keeps the same colour in both places.
+      </>
+    ),
+  },
+  {
     title: 'The five stat cards do not add up to the total',
     body: (
       <>
@@ -71,8 +84,9 @@ const SECTIONS: Array<{ title: string; body: React.ReactNode }> = [
     title: 'Re-importing the same date replaces it',
     body: (
       <>
-        Snapshots are identified by their date, so importing the same day twice replaces rather
-        than duplicates — you will be asked to confirm first. That also means a failed import can
+        Snapshots are identified by their date <em>and property</em>, so importing the same day
+        twice into the same property replaces rather than duplicates — the two properties can each
+        hold a snapshot for the same date without touching each other — you will be asked to confirm first. That also means a failed import can
         simply be run again. Manual volume edits on a replaced snapshot are lost, which is why the
         confirmation says so.
       </>
@@ -84,10 +98,10 @@ export function HowItWorks() {
   return (
     <div className="animate-fade-up flex max-w-[720px] flex-col gap-3">
       <p className="text-[13px] leading-relaxed" style={{ color: 'var(--text-2)' }}>
-        This dashboard tracks Google keyword positions for <strong>hazreviews.com</strong> over
-        time. Each import is stored as an immutable dated snapshot, so history never changes
-        underneath you. Below are the rules that are not obvious from the screen — every one of
-        them looks like a bug until you know it.
+        This dashboard tracks Google keyword positions for <strong>hazreviews.com</strong> and{' '}
+        <strong>onlinecasinokuwait.com</strong> over time. Each import is stored as an immutable
+        dated snapshot, so history never changes underneath you. Below are the rules that are not
+        obvious from the screen — every one of them looks like a bug until you know it.
       </p>
 
       {SECTIONS.map(({ title, body }) => (

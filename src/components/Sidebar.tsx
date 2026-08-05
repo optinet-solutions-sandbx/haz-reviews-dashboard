@@ -176,8 +176,11 @@ function SidebarBody({
           >
             Haz Reviews
           </div>
+          {/* Not a single domain any more — the property in view is named in the
+              switcher directly below, so repeating one here would contradict it
+              whenever the other property is selected. */}
           <div className="truncate font-mono text-[9px]" style={{ color: 'var(--muted-3)' }}>
-            hazreviews.com
+            {SITES.length} properties
           </div>
         </div>
       </div>
