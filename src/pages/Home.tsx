@@ -70,7 +70,7 @@ export function Home() {
             {leaderboard.map(({ group, keywords: kw, avg, fromDate }) => (
               <Link
                 key={group.name}
-                to={`/rankings/${groupSlug(group.name)}`}
+                to={`/${ctx.activeSite.slug}/rankings/${groupSlug(group.name)}`}
                 className="flex h-[38px] items-center gap-2.5 border-b px-1 text-[12px] last:border-b-0"
                 style={{ borderColor: 'var(--border-3)' }}
               >

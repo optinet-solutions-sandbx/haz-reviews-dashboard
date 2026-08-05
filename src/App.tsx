@@ -29,6 +29,7 @@ import {
   updateRecordFields,
   upsertSnapshot,
 } from './lib/storage'
+import { DEFAULT_SITE_ID, SITE_BY_SLUG, siteById, type Site } from './lib/sites'
 import { applyTheme, loadTheme, toggleTheme, type Theme } from './lib/theme'
 import { getWriteGate, useAuth } from './lib/useAuth'
 import { AuthGate } from './components/AuthGate'
@@ -49,22 +50,40 @@ import { HowItWorks } from './pages/HowItWorks'
 import { Log } from './pages/Log'
 import { Rankings } from './pages/Rankings'
 
+/** Keyed by the path segment AFTER the site slug. */
 const SECTION_TITLES: Record<string, [string, string]> = {
-  '/rankings': ['Rankings', 'Keyword positions for hazreviews.com'],
-  '/log': ['Activity Log', 'Who changed what, and when'],
-  '/how-it-works': ['How It Works', 'A quick guide to using the dashboard'],
-  '/admin/users': ['Users', 'Access and approvals'],
+  rankings: ['Rankings', 'Keyword positions'],
+  log: ['Activity Log', 'Who changed what, and when'],
+  'how-it-works': ['How It Works', 'A quick guide to using the dashboard'],
+  'admin/users': ['Users', 'Access and approvals'],
 }
 
-const DEFAULT_TITLE: [string, string] = ['Haz Reviews', 'Command center · hazreviews.com']
+/**
+ * The property is never hard-coded into a title — with two of them, a stale
+ * domain in the subtitle is a lie the user has no reason to doubt.
+ */
+function titleFor(pathname: string, site: Site): [string, string] {
+  const rest = pathname.split('/').filter(Boolean)
+  // Drop the site slug when present, so '/hazreviews/rankings' and the global
+  // '/log' both resolve against the same table.
+  if (rest[0] && SITE_BY_SLUG.has(rest[0])) rest.shift()
+  const joined = rest.join('/')
+  const key = Object.keys(SECTION_TITLES).find((k) => joined.startsWith(k))
+  if (!key) return [site.name, `Command center · ${site.domain}`]
+  const [title, subtitle] = SECTION_TITLES[key]
+  return [title, key === 'rankings' ? `${subtitle} for ${site.domain}` : subtitle]
+}
 
 export function App() {
   return (
     <AuthGate>
       <Routes>
         <Route element={<Layout />}>
+          {/* Site-scoped. The slug is the first segment so a link to a
+              property is shareable — which matters when the deliverable is a
+              link handed to a client. */}
           <Route
-            index
+            path=":siteSlug"
             element={
               <RankingGate>
                 <Home />
@@ -72,7 +91,7 @@ export function App() {
             }
           />
           <Route
-            path="rankings"
+            path=":siteSlug/rankings"
             element={
               <RankingGate>
                 <Rankings />
@@ -80,19 +99,27 @@ export function App() {
             }
           />
           <Route
-            path="rankings/:groupSlug"
+            path=":siteSlug/rankings/:groupSlug"
             element={
               <RankingGate>
                 <Rankings />
               </RankingGate>
             }
           />
-          {/* These have their own data sources and must not wait on a large
-              ranking fetch, so they sit outside RankingGate. */}
+          {/* Global — not scoped to a property. These have their own data
+              sources and must not wait on a large ranking fetch, so they also
+              sit outside RankingGate. */}
           <Route path="log" element={<Log />} />
           <Route path="how-it-works" element={<HowItWorks />} />
           <Route path="admin/users" element={<AdminUsers />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
+          {/* Catches both '/' and an unknown slug, so a typo lands on the
+              default property rather than a blank screen. Routes match on the
+              SLUG, not the id — the two coincide for hazreviews and would not
+              for a site whose stored id is longer than its URL segment. */}
+          <Route
+            path="*"
+            element={<Navigate to={`/${siteById(DEFAULT_SITE_ID).slug}`} replace />}
+          />
         </Route>
       </Routes>
     </AuthGate>
@@ -126,10 +153,17 @@ function Layout() {
   const location = useLocation()
   const auth = useAuth()
 
+  // Parsed from the path rather than useParams: Layout is the PARENT of the
+  // routes that declare :siteSlug, so the param is not in scope here.
+  const activeSite = useMemo(() => {
+    const first = location.pathname.split('/').filter(Boolean)[0]
+    return (first && SITE_BY_SLUG.get(first)) || siteById(DEFAULT_SITE_ID)
+  }, [location.pathname])
+
   const [state, setState] = useState<AppState>({
     snapshots: [],
     snapshotMeta: [],
-    activeSnapshotId: null,
+    activeSnapshotIdBySite: {},
   })
   const [loading, setLoading] = useState(true)
   const [showUpload, setShowUpload] = useState(false)
@@ -166,7 +200,7 @@ function Layout() {
     loadRecentSnapshots(DEFAULT_RECENT)
       .then(({ meta, snapshots }) => {
         if (!active) return
-        setState({ snapshotMeta: meta, snapshots, activeSnapshotId: null })
+        setState({ snapshotMeta: meta, snapshots, activeSnapshotIdBySite: {} })
       })
       .catch((err: unknown) => {
         if (!active) return
@@ -192,7 +226,21 @@ function Layout() {
   // to state at load time would freeze inheritance permanently: downstream
   // records would already hold inherited values, so the fill-only-if-empty rule
   // would skip them forever.
+  // Carry-forward runs across BOTH sites — applyCarryForward partitions
+  // internally — and the view then narrows to the active one.
   const viewSnapshots = useMemo(() => applyCarryForward(state.snapshots), [state.snapshots])
+
+  const siteSnapshots = useMemo(
+    () => viewSnapshots.filter((s) => s.site === activeSite.id),
+    [viewSnapshots, activeSite.id],
+  )
+
+  const siteMeta = useMemo(
+    () => state.snapshotMeta.filter((m) => m.site === activeSite.id),
+    [state.snapshotMeta, activeSite.id],
+  )
+
+  const activeSnapshotId = state.activeSnapshotIdBySite[activeSite.id] ?? null
 
   const writeGate = useMemo(
     () => getWriteGate(auth.session, auth.isApproved, auth.accessLoading),
@@ -201,17 +249,16 @@ function Layout() {
 
   // Groups that actually have data, for the sidebar's contextual list.
   const groupsWithData = useMemo(() => {
-    const active =
-      viewSnapshots.find((s) => s.id === state.activeSnapshotId) ?? viewSnapshots[0]
+    const active = siteSnapshots.find((s) => s.id === activeSnapshotId) ?? siteSnapshots[0]
     if (!active) return []
     const present = new Set(active.records.map((r) => groupForKeyword(r.keyword).name))
     return [...GROUPS, OTHER_GROUP].filter((g) => present.has(g.name))
-  }, [viewSnapshots, state.activeSnapshotId])
+  }, [siteSnapshots, activeSnapshotId])
 
-  const [title, subtitle] = useMemo(() => {
-    const match = Object.keys(SECTION_TITLES).find((p) => location.pathname.startsWith(p))
-    return match ? SECTION_TITLES[match] : DEFAULT_TITLE
-  }, [location.pathname])
+  const [title, subtitle] = useMemo(
+    () => titleFor(location.pathname, activeSite),
+    [location.pathname, activeSite],
+  )
 
   // ─── Persistence primitives ───────────────────────────────────────────────
 
@@ -231,7 +278,12 @@ function Layout() {
           )
           const meta = [
             ...prev.snapshotMeta.filter((m) => m.id !== snapshot.id),
-            { id: snapshot.id, rawDate: snapshot.rawDate, displayDate: snapshot.displayDate },
+            {
+              id: snapshot.id,
+              site: snapshot.site,
+              rawDate: snapshot.rawDate,
+              displayDate: snapshot.displayDate,
+            },
           ].sort((a, b) => b.rawDate.localeCompare(a.rawDate))
           return { ...prev, snapshots, snapshotMeta: meta }
         })
@@ -250,9 +302,11 @@ function Layout() {
       if (!saved) return
 
       const groups = new Set(result.snapshot.records.map((r) => groupForKeyword(r.keyword).name))
+      // Site-qualified: with two properties in one log, "Imported … 4 Aug 26"
+      // is ambiguous — there can be two.
       void logActivity(
         'upload',
-        'rankings',
+        `rankings:${result.snapshot.site}`,
         `Imported ${result.snapshot.records.length.toLocaleString()} records · ${groups.size} groups — ${result.snapshot.displayDate}`,
       )
 
@@ -305,16 +359,27 @@ function Layout() {
         addToast(err instanceof Error ? err.message : String(err), 'error')
         return
       }
-      void logActivity('delete', 'rankings', `Deleted snapshot ${target?.displayDate ?? id}`)
+      // Site read off the meta entry that was already looked up, so the log can
+      // never disagree with what was actually deleted.
+      void logActivity(
+        'delete',
+        `rankings:${target?.site ?? activeSite.id}`,
+        `Deleted snapshot ${target?.displayDate ?? id}`,
+      )
       setState((prev) => ({
         ...prev,
         snapshots: prev.snapshots.filter((s) => s.id !== id),
         snapshotMeta: prev.snapshotMeta.filter((m) => m.id !== id),
-        activeSnapshotId: prev.activeSnapshotId === id ? null : prev.activeSnapshotId,
+        activeSnapshotIdBySite: Object.fromEntries(
+          Object.entries(prev.activeSnapshotIdBySite).map(([site, active]) => [
+            site,
+            active === id ? null : active,
+          ]),
+        ),
       }))
       addToast(`Deleted snapshot ${target?.displayDate ?? id}`)
     },
-    [state.snapshotMeta, auth, addToast],
+    [state.snapshotMeta, auth, addToast, activeSite.id],
   )
 
   const handleEditCell = useCallback(
@@ -336,7 +401,7 @@ function Layout() {
       if ('searchVolume' in patch) {
         void logActivity(
           'edit',
-          'rankings',
+          `rankings:${snapshot?.site ?? activeSite.id}`,
           `Volume '${before?.searchVolume ?? ''}' → '${patch.searchVolume ?? ''}' · ${matcher.keyword ?? 'all keywords'}`,
         )
       }
@@ -350,7 +415,7 @@ function Layout() {
         ),
       }))
     },
-    [state.snapshots, auth],
+    [state.snapshots, auth, activeSite.id],
   )
 
   const handleLoadOlder = useCallback(async () => {
@@ -358,7 +423,11 @@ function Layout() {
     setLoadOlderError(null)
     try {
       const loadedIds = new Set(state.snapshots.map((s) => s.id))
-      const next = state.snapshotMeta.filter((m) => !loadedIds.has(m.id)).slice(0, DEFAULT_RECENT)
+      // Active site only — otherwise the button on one property silently pulls
+      // the other property's history into memory.
+      const next = state.snapshotMeta
+        .filter((m) => m.site === activeSite.id && !loadedIds.has(m.id))
+        .slice(0, DEFAULT_RECENT)
       if (next.length === 0) return
       const older = await loadOlderSnapshots(next)
       setState((prev) => ({
@@ -370,7 +439,7 @@ function Layout() {
     } finally {
       setLoadingOlder(false)
     }
-  }, [state.snapshots, state.snapshotMeta])
+  }, [state.snapshots, state.snapshotMeta, activeSite.id])
 
   const handleToggleTheme = useCallback(() => {
     setTheme((prev) => {
@@ -397,10 +466,15 @@ function Layout() {
 
   const context: HzOutletContext = useMemo(
     () => ({
-      snapshots: viewSnapshots,
-      snapshotMeta: state.snapshotMeta,
-      activeSnapshotId: state.activeSnapshotId,
-      onSelectSnapshot: (id) => setState((prev) => ({ ...prev, activeSnapshotId: id })),
+      activeSite,
+      snapshots: siteSnapshots,
+      snapshotMeta: siteMeta,
+      activeSnapshotId,
+      onSelectSnapshot: (id) =>
+        setState((prev) => ({
+          ...prev,
+          activeSnapshotIdBySite: { ...prev.activeSnapshotIdBySite, [activeSite.id]: id },
+        })),
       onOpenUpload: handleOpenUpload,
       onDeleteSnapshot: (id) => void handleDeleteSnapshot(id),
       onEditCell: handleEditCell,
@@ -418,9 +492,10 @@ function Layout() {
       loadOlderError,
     }),
     [
-      viewSnapshots,
-      state.snapshotMeta,
-      state.activeSnapshotId,
+      activeSite,
+      siteSnapshots,
+      siteMeta,
+      activeSnapshotId,
       handleOpenUpload,
       handleDeleteSnapshot,
       handleEditCell,
@@ -438,7 +513,9 @@ function Layout() {
     ],
   )
 
-  const latestDate = state.snapshotMeta[0]?.displayDate ?? null
+  // Active property only — a sidebar claiming "last updated" from the other
+  // site's upload would be quietly wrong.
+  const latestDate = siteMeta[0]?.displayDate ?? null
   const existingCount =
     duplicateWarning
       ? (state.snapshots.find((s) => s.id === duplicateWarning.snapshot.id)?.records.length ?? null)

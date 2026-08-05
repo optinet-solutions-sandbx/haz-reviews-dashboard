@@ -22,7 +22,7 @@ export function Rankings() {
 
   const group =
     GROUP_BY_SLUG.get(slug) ?? (slug === groupSlug(OTHER_GROUP.name) ? OTHER_GROUP : undefined)
-  if (!group) return <Navigate to="/rankings" replace />
+  if (!group) return <Navigate to={`/${ctx.activeSite.slug}/rankings`} replace />
 
   // Keyed so switching group remounts with clean internal filter state.
   return <GroupView key={group.name} ctx={ctx} group={group} />
@@ -70,7 +70,7 @@ function GroupGrid({ ctx }: { ctx: HzOutletContext }) {
         {cards.map(({ group, keywords, avg }) => (
           <Link
             key={group.name}
-            to={`/rankings/${groupSlug(group.name)}`}
+            to={`/${ctx.activeSite.slug}/rankings/${groupSlug(group.name)}`}
             className="rounded-xl p-3.5 transition-colors"
             style={{ background: 'var(--surface)', border: '1px solid var(--border-2)' }}
           >
@@ -183,7 +183,7 @@ function GroupView({ ctx, group }: { ctx: HzOutletContext; group: KeywordGroup }
     <div className="animate-fade-up flex flex-col gap-4">
       <div className="flex items-center gap-2.5">
         <Link
-          to="/rankings"
+          to={`/${ctx.activeSite.slug}/rankings`}
           className="flex h-7 w-7 items-center justify-center rounded-lg"
           style={{ border: '1px solid var(--border)', color: 'var(--muted)' }}
           aria-label="Back to all groups"
