@@ -1,3 +1,5 @@
+import type { Site } from '../lib/sites'
+
 // ─── Data ────────────────────────────────────────────────────────────────
 
 /**
@@ -26,8 +28,11 @@ export interface RankingRecord {
 }
 
 export interface Snapshot {
-  /** 'snap-<rawDate>' — deterministic, which is what makes upsert idempotent. */
+  /** 'snap-<siteId>-<rawDate>' — deterministic, which is what makes upsert
+   *  idempotent, and site-scoped so two properties can share a date. */
   id: string
+  /** A site id from the registry in lib/sites.ts. Stored, so never renamed. */
+  site: string
   rawDate: string
   /** e.g. '4 Aug 26'. Re-derived from rawDate on read, never trusted. */
   displayDate: string
@@ -36,6 +41,7 @@ export interface Snapshot {
 
 export interface SnapshotMeta {
   id: string
+  site: string
   rawDate: string
   displayDate: string
 }
@@ -109,12 +115,20 @@ export interface ParseResult {
 // ─── App state ───────────────────────────────────────────────────────────
 
 export interface AppState {
-  /** Hydrated: the recent window plus any older snapshots loaded on demand. */
+  /** Hydrated: the recent window plus any older snapshots loaded on demand.
+   *  Holds BOTH sites; views filter by the active one. */
   snapshots: Snapshot[]
-  /** Every snapshot that exists, metadata only. */
+  /** Every snapshot that exists, metadata only. Both sites. */
   snapshotMeta: SnapshotMeta[]
-  /** null means "the most recent". */
-  activeSnapshotId: string | null
+  /**
+   * Keyed by site id — null means "the most recent for that site".
+   *
+   * A single shared id would leak across the switcher: selecting an August date
+   * on HAZREVIEWS and then switching to Kuwait would look up an id belonging to
+   * the other property, silently falling back to Kuwait's latest while the date
+   * tab bar still highlighted August.
+   */
+  activeSnapshotIdBySite: Record<string, string | null>
 }
 
 export interface ToastItem {
@@ -183,8 +197,11 @@ export interface RecordPatch {
  * there is no prop drilling and no provider nesting.
  */
 export interface HzOutletContext {
-  /** Carry-forward APPLIED — this is the view, not the raw state. */
+  /** Read from the URL, not from state — so a link to a property is shareable. */
+  activeSite: Site
+  /** Carry-forward APPLIED, and FILTERED to activeSite. */
   snapshots: Snapshot[]
+  /** Metadata for activeSite only. */
   snapshotMeta: SnapshotMeta[]
   activeSnapshotId: string | null
   onSelectSnapshot: (id: string) => void
