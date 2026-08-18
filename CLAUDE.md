@@ -185,6 +185,26 @@ Violating any of these produces silent wrongness rather than an error.
     page that scrolls and one that does not. `both-edges`, not `stable`: one
     edge is stable but still off-centre.
 
+31. **Never write an extensionless relative import in `api/` or `server/`.** Use
+    `'../server/askAi.js'`, naming the EMITTED file, even though the source is
+    `.ts`. Those two directories are the only code here that runs under raw Node
+    ESM: Vercel transpiles each file separately instead of bundling, and
+    `package.json` declares `"type": "module"`, so Node's resolver handles the
+    specifier and demands an extension. Extensionless resolves perfectly in dev,
+    because Vite resolves it and Node never sees it, then answers 500
+    ERR_MODULE_NOT_FOUND on every deployed request. `tsc -b`, `vite build` and the
+    whole suite pass either way. Asserted by `server/nodeEsm.test.ts`.
+32. **Never export a Vercel function as `export default`.** Export named HTTP
+    methods — `export function GET`, `export async function POST`. The export shape
+    is what selects the calling convention, and the failure mode for mixing them is
+    the worst available: a Web-style body behind a default export is handed
+    `(IncomingMessage, ServerResponse)`, `request.method` exists on
+    IncomingMessage so nothing throws, a `Response` is built and returned, and
+    nothing ever writes to the real response — so every request hangs until
+    `maxDuration` and answers 504, at 60 seconds of billed compute apiece. Again
+    invisible to the type-check, the build and the suite. Asserted by
+    `server/vercelHandlers.test.ts`.
+
 ## Conventions
 
 | Convention | Detail |
@@ -347,6 +367,15 @@ project behind it. Its environment variables:
 
 `VITE_REQUIRE_AUTH` is deliberately absent: `resolveRequireAuth` ignores it in a
 demo build.
+
+Those three are set on **Production only**. Vercel CLI 54 cannot target "all
+Preview branches" non-interactively — it demands a specific branch name — so a
+preview deployment currently white-screens, because `supabase.ts` throws at module
+load without the two placeholders. Fix it in the dashboard when you first need a
+preview: Settings → Environment Variables → tick Preview. Production is unaffected.
+
+The GitHub repo is connected, so every push to `master` redeploys to production.
+`vercel --prod` from a working copy does the same thing without a push.
 
 **The demo's assistant endpoint is unauthenticated.** The gate is off, so
 `POST /api/ask-ai` is world-callable and spends whatever key is configured. Give
