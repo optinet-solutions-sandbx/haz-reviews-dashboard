@@ -16,34 +16,50 @@ import {
 
 /**
  * PRODUCTION endpoint for Ask AI, and the deployed counterpart to
- * `vite/askAiProxy.ts` — which is `apply: 'serve'` and therefore does not exist
- * in a build at all. Same path, same NDJSON contract, same readiness probe, so
+ * `vite/askAiProxy.ts` — which is `apply: 'serve'` and therefore does not exist in
+ * a build at all. Same path, same NDJSON contract, same readiness probe, so
  * `src/lib/assistant.ts` needs no change and stays provider-blind.
  *
- * Written against the Web `Request`/`Response` signature rather than the Node
- * `(req, res)` one specifically for the streaming: a `ReadableStream` body is the
- * documented way to stream from a Vercel function, where Node-style buffering
- * behaviour is the thing that would quietly turn a token-by-token reply into one
- * lump arriving after a long pause.
+ * Exported as NAMED HTTP methods, never as a default. That choice is what selects
+ * Vercel's Web signature — a `Request` in and a `Response` out — and a default
+ * export would instead select the Node `(req, res)` signature and expect this code
+ * to write to `res` itself. Mixing them does not fail loudly: a Web-style body
+ * behind a default export receives `(IncomingMessage, ServerResponse)`,
+ * `request.method` exists on IncomingMessage so nothing throws, the `Response` is
+ * built and returned, and nothing ever writes to the real response — so every
+ * request hangs until maxDuration and answers 504. Asserted by
+ * server/vercelHandlers.test.ts.
  *
- * The key is read from `process.env` here — never `VITE_`-prefixed, or it would be
+ * The Web signature is also what makes the streaming honest: a `ReadableStream`
+ * body streams, where Node-style buffering is what would quietly turn a
+ * token-by-token reply into one lump arriving after a long pause.
+ *
+ * There is no OPTIONS or PUT here on purpose — Vercel answers 405 for any method
+ * this module does not export.
+ *
+ * The key is read from `process.env`, never `VITE_`-prefixed, or it would be
  * inlined into the client bundle and readable in devtools (invariant 27).
  */
 
 const JSON_HEADERS = { 'Content-Type': 'application/json' }
 
-export default async function handler(request: Request): Promise<Response> {
-  const config = readAskAiConfig((name) => process.env[name] ?? '')
+const readEnv = (name: string) => process.env[name] ?? ''
 
-  // GET is the readiness probe. It answers JSON so the client can tell "this
-  // endpoint exists and is configured" from a static host quietly serving
-  // index.html for an unknown path — which is what a build without this function
-  // does, and which a bare status-code check would read as success.
-  if (request.method === 'GET') {
-    return new Response(JSON.stringify(probeBody(config)), { status: 200, headers: JSON_HEADERS })
-  }
+/**
+ * The readiness probe. Answers JSON so the client can tell "this endpoint exists
+ * and is configured" from a static host quietly serving index.html for an unknown
+ * path — which is what a deployment without this function does, and which a bare
+ * status-code check would read as success. Spends no tokens.
+ */
+export function GET(): Response {
+  return new Response(JSON.stringify(probeBody(readAskAiConfig(readEnv))), {
+    status: 200,
+    headers: JSON_HEADERS,
+  })
+}
 
-  if (request.method !== 'POST') return new Response(null, { status: 405 })
+export async function POST(request: Request): Promise<Response> {
+  const config = readAskAiConfig(readEnv)
 
   // 503 rather than an error event: "not configured" is a different state from
   // "the request failed", and the UI shows a different thing for each.
@@ -70,7 +86,7 @@ export default async function handler(request: Request): Promise<Response> {
     })
   }
 
-  // Narrowed before the closure below captures it, so the stream body cannot see
+  // Narrowed before the stream below captures it, so the body cannot close over
   // the un-validated value.
   const askAiRequest = parsed
   const encoder = new TextEncoder()
@@ -79,8 +95,8 @@ export default async function handler(request: Request): Promise<Response> {
     async start(controller) {
       const send = (event: AskAiEvent) =>
         controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`))
-      // streamAskAi never throws — a mid-stream failure arrives as an event,
-      // because the 200 and the headers are already committed by this point.
+      // streamAskAi never throws — by this point the 200 and the headers are
+      // committed, so a mid-stream failure has to arrive as an event.
       await streamAskAi(config, askAiRequest, send)
       controller.close()
     },
@@ -91,9 +107,9 @@ export default async function handler(request: Request): Promise<Response> {
     headers: {
       'Content-Type': 'application/x-ndjson; charset=utf-8',
       'Cache-Control': 'no-store',
-      // Conventional opt-out for proxies that buffer a response of unknown
-      // length; inert where it is not understood, and cheaper than discovering
-      // an intermediary batched the whole answer into one chunk.
+      // Conventional opt-out for proxies that buffer a response of unknown length;
+      // inert where it is not understood, and cheaper than discovering that an
+      // intermediary batched the whole answer into one chunk.
       'X-Accel-Buffering': 'no',
     },
   })
