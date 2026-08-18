@@ -7,12 +7,14 @@ Guidance for Claude Code when working in this repository.
 ```bash
 npm run dev       # Vite dev server on localhost:3002 (strictPort)
 npm run build     # tsc -b && vite build — the primary regression net
-npm test          # vitest run — 239 tests, node environment
+npm test          # vitest run — 245 tests, node environment
 npm run test:watch
 ```
 
-There is no `/api` directory and no serverless function, so `npm run dev` serves
-the whole app. Everything works under plain `npm run dev`.
+`api/ask-ai.ts` is the only serverless function and it exists for DEPLOYED builds
+only: under `npm run dev` that same path is served by the Vite middleware in
+`vite/askAiProxy.ts`. Everything works under plain `npm run dev` — nothing local
+needs Vercel.
 
 ## What this is
 
@@ -230,15 +232,35 @@ an existing admin, so the first one is unreachable through the UI.
 Until then `VITE_DEV_FORCE_ADMIN=true` forces `isAdmin` and an account email so the
 admin nav group and the footer identity render with no backend. It is a
 convenience, not a security control — `import.meta.env.DEV` is statically false in
-a production build, so the branch is dropped entirely (verified: the flag name does
-not appear in `dist/`). `writeGate` is deliberately left alone, so a forced admin
+a production build, so a stray flag in a deployed environment does nothing
+(verified: the flag name does not appear in `dist/`). `writeGate` is deliberately left alone, so a forced admin
 still reads "Sign in to make changes", which is true.
 
 `VITE_DEV_FORCE_FIXTURE=true` is the same idea for data: two weeks of stand-in
 snapshots for the registered property, so Home's cards, leaderboard, movers and
 dialogs render with real numbers. `devFixture.test.ts` compares its ids against
-the registry, so adding a property fails the suite until stand-in rows join it. Same `DEV` guard, verified the same way — neither the
-flag name nor the fixture keywords appear in `dist/`.
+the registry, so adding a property fails the suite until stand-in rows join it.
+Same `DEV` guard, so the same "a stray flag in a deployed environment does
+nothing" holds.
+
+Note what that guard does NOT do, because this file asserted otherwise until
+2026-08-18: it makes the fixture **inert** in a production build, not **absent**.
+Both resolvers read `DEV` off a function parameter, so Rollup cannot prove the
+early return and the fixture rows ship in every bundle — `grep -r example.com
+dist/` finds them. The behaviour was never wrong; the size claim was. It costs a
+few kB, and it is why demo mode costs no bundle size at all.
+
+`VITE_DEMO_MODE=true` is the deployed counterpart: ONE flag that turns on the
+fixture and the forced admin together, and forces the auth gate off. It exists
+because the deployed demo has no backend whatsoever — no session is obtainable
+there, so without it nothing would render. It is deliberately a SEPARATE flag from
+the two above rather than a lifted `DEV` guard, and that is the whole point: it is
+what keeps "a stray `VITE_DEV_FORCE_*` in a deployed environment does nothing"
+true. `resolveRequireAuth` forces the gate off in a demo build rather than
+trusting `VITE_REQUIRE_AUTH`, because a demo with the gate left on deploys a login
+wall in front of stand-in data — a broken deploy rather than a misconfigured one.
+The footer address is `demo@example.com` rather than dev's `dev@localhost`: a
+deployed footer reading `dev@localhost` looks like leaked local config.
 
 `MARKET_ORDER` is `['AE']`, an explicit assumption — see §12 of the spec for the
 full list of decisions made without confirmation from the requestor.
@@ -256,10 +278,13 @@ two-turn thread, the offline state, and a provider failure.
   answering `{assistant, model}`; `POST` streams NDJSON. The probe insists on a
   JSON content-type because a static host answers an unknown path with
   `index.html` and a 200, which a status-code check reads as success.
-- **A deployed build has no endpoint**, so the page reports itself offline until a
-  real function is deployed at the same path — a Supabase Edge Function is the
-  natural home. `src/lib/assistant.ts` is provider-blind, so that swap needs no
-  client change.
+- **A deployed build serves the same path from `api/ask-ai.ts`**, a Vercel
+  function. Both hosts share `server/askAi.ts` — the provider call and the three
+  HTTP-200 failure cases live there once, so dev and production cannot drift
+  apart on them. On a host without that function the page reports itself offline,
+  which is the probe working as designed. `src/lib/assistant.ts` stays
+  provider-blind, so swapping in a Supabase Edge Function later needs no client
+  change.
 - **Three outcomes arrive with HTTP 200** and are each surfaced rather than read as
   success: a refusal, a `content_filter` finish, and `length` (truncation). On a
   reasoning model, hidden reasoning tokens count against `max_completion_tokens`,
@@ -300,3 +325,29 @@ two-turn thread, the offline state, and a provider failure.
   none). The transcript fills the draft and never auto-sends: recognition mishears,
   and sending would spend a request on the wrong question. Note that Chrome
   implements this by streaming audio to Google's speech service.
+
+## Deployment
+
+Vercel, under the `sandbox` team, from the GitHub repo owned by the sandbox
+account. `vercel.json` carries two things: the SPA rewrite (every path to
+`index.html`, because routing is client-side and a hard refresh on `/rankings`
+would otherwise 404) and a 60-second `maxDuration` for `api/ask-ai.ts` — the
+default 10 seconds can cut a long streamed answer off mid-sentence.
+
+The live deployment is a **frontend** demo: `VITE_DEMO_MODE=true`, no Supabase
+project behind it. Its environment variables:
+
+| Variable | Value | Why it is needed |
+|---|---|---|
+| `VITE_SUPABASE_URL` | placeholder URL | `supabase.ts` throws at module load without it, so the app white-screens — even though demo mode never issues a query |
+| `VITE_SUPABASE_ANON_KEY` | placeholder | same |
+| `VITE_DEMO_MODE` | `true` | fixture data, forced admin, gate off |
+| `OPENAI_API_KEY` | real key, **never `VITE_`-prefixed** | invariant 27 — a `VITE_` variable is inlined into the bundle |
+| `OPENAI_MODEL` | optional, e.g. `gpt-4o-mini` | defaults to `gpt-4o` |
+
+`VITE_REQUIRE_AUTH` is deliberately absent: `resolveRequireAuth` ignores it in a
+demo build.
+
+**The demo's assistant endpoint is unauthenticated.** The gate is off, so
+`POST /api/ask-ai` is world-callable and spends whatever key is configured. Give
+it a capped or throwaway key — nothing in the app limits who may ask.
