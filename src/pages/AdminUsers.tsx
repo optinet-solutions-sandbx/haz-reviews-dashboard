@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Navigate, useOutletContext } from 'react-router-dom'
 import type { HzOutletContext, UserAccessRow, UserAccessStatus } from '../types'
 import { loadUserAccess, setUserAdmin, setUserStatus } from '../lib/userAccess'
+import { PageHeader } from '../components/PageHeader'
 
 const STATUS_ACCENT: Record<UserAccessStatus, string> = {
   approved: 'var(--pos)',
@@ -52,7 +53,10 @@ export function AdminUsers() {
   }
 
   return (
-    <div className="animate-fade-up flex flex-col gap-3">
+    <div className="animate-fade-up flex flex-col gap-4">
+      <PageHeader title="Manage">
+        {rows === null ? 'Loading…' : `${rows.length} account${rows.length === 1 ? '' : 's'}`}
+      </PageHeader>
       {error && (
         <p className="text-[12px]" style={{ color: 'var(--neg)' }}>
           {error}

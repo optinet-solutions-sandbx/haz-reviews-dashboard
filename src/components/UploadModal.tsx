@@ -101,7 +101,10 @@ export function UploadModal({ defaultSiteId, onClose, onConfirm }: UploadModalPr
           >
             Import into
           </div>
-          <div className="flex gap-2">
+          {/* Two columns, not one flex row. `flex-1` across six properties leaves
+              each chip about 70px wide inside a 520px dialog — narrower than the
+              dot and padding alone — so every label truncated to one letter. */}
+          <div className="grid grid-cols-2 gap-2">
             {SITES.map((site) => {
               const selected = site.id === siteId
               return (
@@ -119,7 +122,7 @@ export function UploadModal({ defaultSiteId, onClose, onConfirm }: UploadModalPr
                     setError(null)
                     setDateOverride('')
                   }}
-                  className="flex flex-1 items-center gap-2 rounded-lg px-3 py-2 text-[12px] transition-colors"
+                  className="flex items-center gap-2 rounded-lg px-3 py-2 text-[12px] transition-colors"
                   style={{
                     border: `1px solid ${selected ? site.color : 'var(--border)'}`,
                     background: selected ? 'var(--active-tint)' : 'transparent',

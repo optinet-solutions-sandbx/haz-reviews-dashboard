@@ -201,6 +201,12 @@ export interface HzOutletContext {
   activeSite: Site
   /** Carry-forward APPLIED, and FILTERED to activeSite. */
   snapshots: Snapshot[]
+  /**
+   * Carry-forward APPLIED, every property. Only Home reads this: it is
+   * deliberately portfolio-wide, so narrowing it to one property would make its
+   * leaderboard a one-row table. Every other page must use `snapshots`.
+   */
+  allSnapshots: Snapshot[]
   /** Metadata for activeSite only. */
   snapshotMeta: SnapshotMeta[]
   activeSnapshotId: string | null

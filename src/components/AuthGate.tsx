@@ -119,7 +119,7 @@ function Centered({ children }: { children: ReactNode }) {
               Haz Reviews
             </div>
             <div className="font-mono text-[9px]" style={{ color: 'var(--muted-3)' }}>
-              hazreviews.com · onlinecasinokuwait.com
+              hazreviews.com
             </div>
           </div>
         </div>

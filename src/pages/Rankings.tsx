@@ -7,6 +7,7 @@ import { avgPosition, computeStats, effectiveDelta, parsePosition } from '../lib
 import { LoadError } from '../components/LoadError'
 import { RankingMatrix } from '../components/RankingMatrix'
 import { SnapshotTabs } from '../components/SnapshotTabs'
+import { PageHeader } from '../components/PageHeader'
 import { StatsRow, type StatKey } from '../components/StatsRow'
 
 export function Rankings() {
@@ -56,10 +57,25 @@ function GroupGrid({ ctx }: { ctx: HzOutletContext }) {
       })
   }, [snapshot])
 
-  if (!snapshot) return <EmptyState onOpenUpload={ctx.onOpenUpload} writeDisabled={ctx.writeGate.disabled} />
+  const header = (
+    <PageHeader title="Rankings">
+      {ctx.activeSite.domain}
+      {snapshot ? ` · ${snapshot.displayDate}` : ''}
+    </PageHeader>
+  )
+
+  if (!snapshot) {
+    return (
+      <div className="animate-fade-up space-y-4">
+        {header}
+        <EmptyState onOpenUpload={ctx.onOpenUpload} writeDisabled={ctx.writeGate.disabled} />
+      </div>
+    )
+  }
 
   return (
     <div className="animate-fade-up flex flex-col gap-4">
+      {header}
       <SnapshotTabs
         snapshots={ctx.snapshots}
         activeId={ctx.activeSnapshotId}
@@ -181,24 +197,35 @@ function GroupView({ ctx, group }: { ctx: HzOutletContext; group: KeywordGroup }
 
   return (
     <div className="animate-fade-up flex flex-col gap-4">
-      <div className="flex items-center gap-2.5">
-        <Link
-          to={`/${ctx.activeSite.slug}/rankings`}
-          className="flex h-7 w-7 items-center justify-center rounded-lg"
-          style={{ border: '1px solid var(--border)', color: 'var(--muted)' }}
-          aria-label="Back to all groups"
-        >
-          <ArrowLeft size={14} />
-        </Link>
-        <span
-          className="flex h-7 w-7 items-center justify-center rounded-lg text-[10px] font-bold text-white"
-          style={{ background: group.color }}
-        >
-          {group.abbr}
-        </span>
-        <h2 className="font-display text-[17px] font-semibold" style={{ color: 'var(--ink)' }}>
-          {group.name}
-        </h2>
+      {/* This IS the page heading, so the group name is an h1 rather than a
+          second-level one — the Topbar no longer supplies a title above it. The
+          back link and colour chip stay alongside it instead of being replaced
+          by a bare PageHeader. */}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2.5">
+          <Link
+            to={`/${ctx.activeSite.slug}/rankings`}
+            className="flex h-7 w-7 items-center justify-center rounded-lg"
+            style={{ border: '1px solid var(--border)', color: 'var(--muted)' }}
+            aria-label="Back to all groups"
+            title="Back to all groups"
+          >
+            <ArrowLeft size={14} />
+          </Link>
+          <span
+            className="flex h-7 w-7 items-center justify-center rounded-lg text-[10px] font-bold text-white"
+            style={{ background: group.color }}
+            aria-hidden
+          >
+            {group.abbr}
+          </span>
+          <h1 className="text-lg font-semibold" style={{ color: 'var(--ink)' }}>
+            {group.name}
+          </h1>
+        </div>
+        <div className="text-sm" style={{ color: 'var(--muted)' }}>
+          {ctx.activeSite.domain}
+        </div>
       </div>
 
       <StatsRow

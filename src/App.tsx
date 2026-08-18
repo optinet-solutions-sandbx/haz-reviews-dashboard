@@ -20,6 +20,8 @@ import type {
 import { logActivity } from './lib/activityLog'
 import { applyCarryForward } from './lib/carryForward'
 import { signOut } from './lib/auth'
+import { DEV_FIXTURE } from './lib/devFixture'
+import { DEV_OVERRIDE } from './lib/devOverrides'
 import { GROUPS, OTHER_GROUP, groupForKeyword } from './lib/groups'
 import {
   DEFAULT_RECENT,
@@ -29,8 +31,7 @@ import {
   updateRecordFields,
   upsertSnapshot,
 } from './lib/storage'
-import { DEFAULT_SITE_ID, SITE_BY_SLUG, siteById, type Site } from './lib/sites'
-import { applyTheme, loadTheme, toggleTheme, type Theme } from './lib/theme'
+import { DEFAULT_SITE_ID, SITE_BY_SLUG, siteById } from './lib/sites'
 import { getWriteGate, useAuth } from './lib/useAuth'
 import { AuthGate } from './components/AuthGate'
 import { DuplicateWarning } from './components/DuplicateWarning'
@@ -45,40 +46,40 @@ import { Topbar } from './components/Topbar'
 import { UploadModal } from './components/UploadModal'
 import { UploadSummary } from './components/UploadSummary'
 import { AdminUsers } from './pages/AdminUsers'
+import { AskAi } from './pages/AskAi'
 import { Home } from './pages/Home'
 import { HowItWorks } from './pages/HowItWorks'
 import { Log } from './pages/Log'
+import { NotBuilt } from './pages/NotBuilt'
 import { Rankings } from './pages/Rankings'
-
-/** Keyed by the path segment AFTER the site slug. */
-const SECTION_TITLES: Record<string, [string, string]> = {
-  rankings: ['Rankings', 'Keyword positions'],
-  log: ['Activity Log', 'Who changed what, and when'],
-  'how-it-works': ['How It Works', 'A quick guide to using the dashboard'],
-  'admin/users': ['Users', 'Access and approvals'],
-}
-
-/**
- * The property is never hard-coded into a title — with two of them, a stale
- * domain in the subtitle is a lie the user has no reason to doubt.
- */
-function titleFor(pathname: string, site: Site): [string, string] {
-  const rest = pathname.split('/').filter(Boolean)
-  // Drop the site slug when present, so '/hazreviews/rankings' and the global
-  // '/log' both resolve against the same table.
-  if (rest[0] && SITE_BY_SLUG.has(rest[0])) rest.shift()
-  const joined = rest.join('/')
-  const key = Object.keys(SECTION_TITLES).find((k) => joined.startsWith(k))
-  if (!key) return [site.name, `Command center · ${site.domain}`]
-  const [title, subtitle] = SECTION_TITLES[key]
-  return [title, key === 'rankings' ? `${subtitle} for ${site.domain}` : subtitle]
-}
+import { Sites } from './pages/Sites'
 
 export function App() {
   return (
     <AuthGate>
       <Routes>
         <Route element={<Layout />}>
+          {/* Home, at the root. A real route rather than a redirect to the
+              default property: the sidebar's Home row points here, and a
+              redirect would rewrite the URL back to '/hazreviews' the instant it
+              was clicked, so the row could never stay on the address it claims.
+              Home is portfolio-wide here; under ':siteSlug' the same component
+              narrows to that property. */}
+          <Route
+            index
+            element={
+              <RankingGate>
+                <Home />
+              </RankingGate>
+            }
+          />
+          {/* The site directory. Declared BEFORE ':siteSlug', though order is not
+              what saves it: React Router ranks a static segment above a dynamic
+              one, so '/sites' can never be read as a site slug. A site whose slug
+              was literally 'sites' would still be unreachable — hence the guard
+              in the registry test. Outside RankingGate on purpose: the list comes
+              from the registry, so it must not wait on a snapshot fetch. */}
+          <Route path="sites" element={<Sites />} />
           {/* Site-scoped. The slug is the first segment so a link to a
               property is shareable — which matters when the deliverable is a
               link handed to a client. */}
@@ -98,6 +99,55 @@ export function App() {
               </RankingGate>
             }
           />
+          {/* The other five per-site tools from the shared design system. Real
+              routes, not omitted links: the site card lists all six, and a listed
+              tool that silently redirected would look broken rather than pending.
+              Each page names what would feed it. */}
+          <Route
+            path=":siteSlug/seo"
+            element={
+              <NotBuilt
+                title="SEO"
+                note="A per-site SEO score, the way the sibling dashboard tracks it. Nothing feeds it here — this app imports keyword position exports only, with no crawl, audit or score behind them."
+              />
+            }
+          />
+          <Route
+            path=":siteSlug/health"
+            element={
+              <NotBuilt
+                title="Health"
+                note="Uptime and technical health checks for this site. No checks run from this dashboard; the only data it holds is dated keyword position snapshots."
+              />
+            }
+          />
+          <Route
+            path=":siteSlug/pagespeed"
+            element={
+              <NotBuilt
+                title="PageSpeed"
+                note="Core Web Vitals and Lighthouse scores over time. Nothing measures them here — wiring this up would mean a PageSpeed Insights key and somewhere to store the runs."
+              />
+            }
+          />
+          <Route
+            path=":siteSlug/backlinks"
+            element={
+              <NotBuilt
+                title="Backlinks"
+                note="Referring domains and link growth for this site. No backlink source is connected; this dashboard reads spreadsheet exports of Google positions and nothing else."
+              />
+            }
+          />
+          <Route
+            path=":siteSlug/qa"
+            element={
+              <NotBuilt
+                title="QA"
+                note="Content and page QA checks per site. Not built — there is no checklist model, no pass/fail store and no crawler to populate one."
+              />
+            }
+          />
           <Route
             path=":siteSlug/rankings/:groupSlug"
             element={
@@ -112,14 +162,30 @@ export function App() {
           <Route path="log" element={<Log />} />
           <Route path="how-it-works" element={<HowItWorks />} />
           <Route path="admin/users" element={<AdminUsers />} />
-          {/* Catches both '/' and an unknown slug, so a typo lands on the
-              default property rather than a blank screen. Routes match on the
-              SLUG, not the id — the two coincide for hazreviews and would not
-              for a site whose stored id is longer than its URL segment. */}
+          {/* Nav rows carried over from the sibling dashboard whose features do
+              not exist here. Declared as real routes on purpose — without them
+              the catch-all below would redirect, so the row would look like it
+              worked while landing the user on Home. */}
+          {/* Full-bleed: see the <main> padding branch below. */}
+          <Route path="ask-ai" element={<AskAi />} />
           <Route
-            path="*"
-            element={<Navigate to={`/${siteById(DEFAULT_SITE_ID).slug}`} replace />}
+            path="trash"
+            element={
+              <NotBuilt
+                title="Trash"
+                note="Deleting a snapshot on this dashboard is immediate and permanent — there is no soft delete for it to recover. Restoring one would need a deleted_at column on snapshots before this page could show anything."
+              />
+            }
           />
+          {/* A multi-segment unknown path lands on Home rather than a blank
+              screen. No longer catches '/' — the index route above is more
+              specific, so React Router matches it first and there is no redirect
+              loop.
+              NOTE: a SINGLE-segment typo never reaches here, because ':siteSlug'
+              matches any one segment. '/nonsense' therefore renders the default
+              property's summary while keeping its bogus URL. That is the existing
+              graceful-fallback behaviour, not a redirect. */}
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>
     </AuthGate>
@@ -170,9 +236,21 @@ function Layout() {
   const [uploadSummary, setUploadSummary] = useState<ParseResult | null>(null)
   const [duplicateWarning, setDuplicateWarning] = useState<ParseResult | null>(null)
   const [toasts, setToasts] = useState<ToastItem[]>([])
-  const [theme, setTheme] = useState<Theme>(loadTheme)
   const [sidebarExpanded, setSidebarExpanded] = useState(loadSidebarExpanded)
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
+  // Closes the mobile drawer on navigation. Adjusted during render rather than in
+  // an effect: an effect fires once on mount too, and closing a drawer that was
+  // never open costs an extra render pass on every single page load. The state
+  // belongs here because Topbar's hamburger opens it and Sidebar renders it, so
+  // it cannot live in either.
+  const fullBleed = location.pathname === '/ask-ai'
+
+  const [prevPathname, setPrevPathname] = useState(location.pathname)
+  if (location.pathname !== prevPathname) {
+    setPrevPathname(location.pathname)
+    if (mobileNavOpen) setMobileNavOpen(false)
+  }
+
   const [loadingOlder, setLoadingOlder] = useState(false)
   const [loadOlderError, setLoadOlderError] = useState<string | null>(null)
   const [snapshotsError, setSnapshotsError] = useState<string | null>(null)
@@ -197,6 +275,17 @@ function Layout() {
     let active = true
     setLoading(true)
     setSnapshotsError(null)
+    // Stand-in data instead of a round trip. Null in every production build, so
+    // this branch cannot displace a real fetch — see devFixture.ts.
+    if (DEV_FIXTURE) {
+      setState({
+        snapshotMeta: DEV_FIXTURE.meta,
+        snapshots: DEV_FIXTURE.snapshots,
+        activeSnapshotIdBySite: {},
+      })
+      setLoading(false)
+      return
+    }
     loadRecentSnapshots(DEFAULT_RECENT)
       .then(({ meta, snapshots }) => {
         if (!active) return
@@ -247,6 +336,19 @@ function Layout() {
     [auth.session, auth.isApproved, auth.accessLoading],
   )
 
+  // Applied here, at the single point where auth reaches the view, rather than
+  // inside useAuth: the hook stays the honest report of what Supabase actually
+  // said. DEV_OVERRIDE is null in every production build — see devOverrides.ts.
+  //
+  // writeGate is deliberately NOT overridden. It is derived from the real
+  // session, so a forced admin still sees "Sign in to make changes" — which is
+  // true, and pretending otherwise would offer writes that must fail.
+  const isAdmin = DEV_OVERRIDE?.isAdmin ?? auth.isAdmin
+  const accountEmail = DEV_OVERRIDE?.email ?? auth.session?.user.email ?? null
+  // A forced admin has no access row to wait on, and AdminUsers holds its
+  // redirect until this clears.
+  const accessLoading = DEV_OVERRIDE ? false : auth.accessLoading
+
   // Groups that actually have data, for the sidebar's contextual list.
   const groupsWithData = useMemo(() => {
     const active = siteSnapshots.find((s) => s.id === activeSnapshotId) ?? siteSnapshots[0]
@@ -254,11 +356,6 @@ function Layout() {
     const present = new Set(active.records.map((r) => groupForKeyword(r.keyword).name))
     return [...GROUPS, OTHER_GROUP].filter((g) => present.has(g.name))
   }, [siteSnapshots, activeSnapshotId])
-
-  const [title, subtitle] = useMemo(
-    () => titleFor(location.pathname, activeSite),
-    [location.pathname, activeSite],
-  )
 
   // ─── Persistence primitives ───────────────────────────────────────────────
 
@@ -441,14 +538,6 @@ function Layout() {
     }
   }, [state.snapshots, state.snapshotMeta, activeSite.id])
 
-  const handleToggleTheme = useCallback(() => {
-    setTheme((prev) => {
-      const next = toggleTheme(prev)
-      applyTheme(next)
-      return next
-    })
-  }, [])
-
   const handleToggleSidebar = useCallback(() => {
     setSidebarExpanded((prev) => {
       saveSidebarExpanded(!prev)
@@ -468,6 +557,7 @@ function Layout() {
     () => ({
       activeSite,
       snapshots: siteSnapshots,
+      allSnapshots: viewSnapshots,
       snapshotMeta: siteMeta,
       activeSnapshotId,
       onSelectSnapshot: (id) =>
@@ -483,8 +573,8 @@ function Layout() {
       requireAuth: auth.requireAuth,
       currentUserId: auth.session?.user.id ?? null,
       writeGate,
-      isAdmin: auth.isAdmin,
-      accessLoading: auth.accessLoading,
+      isAdmin,
+      accessLoading,
       snapshotsLoading: loading,
       snapshotsError,
       onReloadSnapshots: () => setReloadToken((t) => t + 1),
@@ -494,6 +584,7 @@ function Layout() {
     [
       activeSite,
       siteSnapshots,
+      viewSnapshots,
       siteMeta,
       activeSnapshotId,
       handleOpenUpload,
@@ -503,8 +594,8 @@ function Layout() {
       addToast,
       auth.requireAuth,
       auth.session,
-      auth.isAdmin,
-      auth.accessLoading,
+      isAdmin,
+      accessLoading,
       writeGate,
       loading,
       snapshotsError,
@@ -513,9 +604,6 @@ function Layout() {
     ],
   )
 
-  // Active property only — a sidebar claiming "last updated" from the other
-  // site's upload would be quietly wrong.
-  const latestDate = siteMeta[0]?.displayDate ?? null
   const existingCount =
     duplicateWarning
       ? (state.snapshots.find((s) => s.id === duplicateWarning.snapshot.id)?.records.length ?? null)
@@ -523,45 +611,58 @@ function Layout() {
 
   return (
     <div className="relative flex h-screen overflow-hidden" style={{ background: 'var(--page)' }}>
-      {/* Background grid */}
-      <div
-        className="pointer-events-none fixed inset-0 z-0 opacity-30"
-        style={{
-          backgroundImage:
-            'linear-gradient(var(--grid-line) 1px, transparent 1px), linear-gradient(90deg, var(--grid-line) 1px, transparent 1px)',
-          backgroundSize: '40px 40px',
-        }}
-        aria-hidden
-      />
-
       <Sidebar
         expanded={sidebarExpanded}
         onToggleExpanded={handleToggleSidebar}
         mobileOpen={mobileNavOpen}
         onCloseMobile={() => setMobileNavOpen(false)}
-        isAdmin={auth.isAdmin}
+        isAdmin={isAdmin}
         groups={groupsWithData}
         activeSite={activeSite}
-        lastUpdated={latestDate}
-        writeGate={writeGate}
-        onOpenUpload={handleOpenUpload}
+        email={accountEmail}
+        onSignIn={auth.openLogin}
+        onSignOut={() => void signOut()}
+      />
+
+      {/* Reserves the rail's footprint. The aside is `fixed`, so without this the
+          rail would float over the content instead of the page reflowing around
+          it. Both widths animate on the same 200ms curve — see RAIL_EXPANDED. */}
+      <div
+        className={`hidden shrink-0 transition-[width] duration-200 ease-out md:block ${
+          sidebarExpanded ? 'md:w-[240px]' : 'md:w-[64px]'
+        }`}
+        aria-hidden
       />
 
       {/* min-w-0 is required: without it a wide matrix forces the whole layout to
           overflow horizontally instead of scrolling inside its own container. */}
       <div className="relative z-10 flex min-w-0 flex-1 flex-col overflow-hidden">
-        <Topbar
-          title={title}
-          subtitle={subtitle}
-          theme={theme}
-          onToggleTheme={handleToggleTheme}
-          onOpenMobileNav={() => setMobileNavOpen(true)}
-          email={auth.session?.user.email ?? null}
-          onSignIn={auth.openLogin}
-          onSignOut={() => void signOut()}
-        />
+        <Topbar open={mobileNavOpen} onOpenMobileNav={() => setMobileNavOpen(true)} />
 
-        <main className="flex-1 overflow-auto px-3 pb-7 pt-5 sm:px-7">
+        {/* `px-4 py-6 md:px-6` verbatim from the shared shell. This gutter is why
+            two dashboards side by side look misaligned even when every card in
+            them measures identically — it offsets the entire page, and the `sm:`
+            breakpoint it used before disagreed with the rail's `md:` besides.
+
+            `scrollbar-gutter` is the other half of the same alignment. The
+            shared shell scrolls the WINDOW; here `main` owns the scroll, so its
+            scrollbar eats the box that centres a `max-w-*` page — which parked
+            every centred column half a scrollbar left of the reference's, and
+            shifted it sideways again between a page that scrolls and one that
+            does not. `both-edges` reserves the gutter on both sides, so the
+            centre is the same number whether a scrollbar is there or not.
+            
+            Ask AI is the one exception — the shared system's single shell escape
+            hatch. It owns its own scroll and pins its composer to the bottom, so
+            page padding and an outer scrollbar would both fight it. One pathname
+            check, not a second layout. */}
+        <main
+          className={
+            fullBleed
+              ? 'min-h-0 flex-1 overflow-hidden'
+              : 'flex-1 overflow-auto px-4 py-6 [scrollbar-gutter:stable_both-edges] md:px-6'
+          }
+        >
           <Outlet context={context} />
         </main>
       </div>

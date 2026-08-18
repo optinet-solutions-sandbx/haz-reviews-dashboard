@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { ActivityLogRow } from '../types'
 import { loadActivityLog } from '../lib/activityLog'
+import { PageHeader } from '../components/PageHeader'
 
 const ACTION_ACCENT: Record<string, string> = {
   upload: 'var(--info)',
@@ -26,40 +27,59 @@ export function Log() {
     }
   }, [])
 
+  // The header renders in every state. Hanging it off the success branch only
+  // would leave the page anonymous while it loads or when it is empty.
+  const header = (
+    <PageHeader title="Audit">
+      {rows === null ? 'Loading…' : `${rows.length} entr${rows.length === 1 ? 'y' : 'ies'}`}
+    </PageHeader>
+  )
+
   if (error) {
     return (
-      <p className="animate-fade-up text-[12px]" style={{ color: 'var(--neg)' }}>
-        {error}
-      </p>
-    )
-  }
-
-  if (rows === null) {
-    return (
-      <p className="animate-fade-up font-mono text-[12px]" style={{ color: 'var(--muted)' }}>
-        Loading activity…
-      </p>
-    )
-  }
-
-  if (rows.length === 0) {
-    return (
-      <div
-        className="animate-fade-up rounded-xl px-6 py-12 text-center"
-        style={{ background: 'var(--surface)', border: '1px solid var(--border-2)' }}
-      >
-        <p className="text-[12px]" style={{ color: 'var(--text-2)' }}>
-          No activity recorded yet.
+      <div className="animate-fade-up space-y-4">
+        {header}
+        <p className="text-[12px]" style={{ color: 'var(--neg)' }}>
+          {error}
         </p>
       </div>
     )
   }
 
+  if (rows === null) {
+    return (
+      <div className="animate-fade-up space-y-4">
+        {header}
+        <p className="font-mono text-[12px]" style={{ color: 'var(--muted)' }}>
+          Loading activity…
+        </p>
+      </div>
+    )
+  }
+
+  if (rows.length === 0) {
+    return (
+      <div className="animate-fade-up space-y-4">
+        {header}
+        <div
+          className="rounded-xl px-6 py-12 text-center"
+          style={{ background: 'var(--surface)', border: '1px solid var(--border-2)' }}
+        >
+          <p className="text-[12px]" style={{ color: 'var(--text-2)' }}>
+            No activity recorded yet.
+          </p>
+        </div>
+      </div>
+    )
+  }
+
   return (
-    <div
-      className="animate-fade-up overflow-hidden rounded-xl"
-      style={{ background: 'var(--surface)', border: '1px solid var(--border-2)' }}
-    >
+    <div className="animate-fade-up space-y-4">
+      {header}
+      <div
+        className="overflow-hidden rounded-xl"
+        style={{ background: 'var(--surface)', border: '1px solid var(--border-2)' }}
+      >
       <div className="overflow-x-auto">
         <table className="w-full border-collapse text-[12px]">
           <thead>
@@ -94,6 +114,7 @@ export function Log() {
           </tbody>
         </table>
       </div>
+    </div>
     </div>
   )
 }

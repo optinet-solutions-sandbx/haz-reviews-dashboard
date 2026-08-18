@@ -7,7 +7,7 @@ Guidance for Claude Code when working in this repository.
 ```bash
 npm run dev       # Vite dev server on localhost:3002 (strictPort)
 npm run build     # tsc -b && vite build — the primary regression net
-npm test          # vitest run — 98 tests, node environment
+npm test          # vitest run — 239 tests, node environment
 npm run test:watch
 ```
 
@@ -39,8 +39,9 @@ and RLS. The visual system and app shell are shared with the sibling
 ### The single biggest difference from the siblings
 
 Those projects model **brand → many domains** and use domain as a matrix axis.
-HazReviews is **one site**, so that model does not transfer — the domain column
-would be constant. Keywords are grouped instead:
+This one does not: a site **scopes the whole view** rather than becoming a column,
+so within any one view the domain is constant and cannot carry the matrix. Keywords
+are grouped instead:
 
 - `groupForKeyword(keyword)` resolves a keyword to exactly one group.
 - **Membership is derived at render time and never stored on a record.** Improving
@@ -106,8 +107,81 @@ Violating any of these produces silent wrongness rather than an error.
     Other group, appended column, import summary.
 18. **Never render a failed load as an empty dataset.** `snapshotsError` exists so
     "could not reach the database" and "no data yet" stay distinguishable.
-19. **Never omit `@source not "../docs"`** from `src/index.css`, or Tailwind v4
+19. **Never change one rail width without the other three.** `RAIL_EXPANDED` and
+    `RAIL_COLLAPSED` in `Sidebar.tsx`, the spacer in `App.tsx`, and `TOGGLE_LEFT`
+    are not derived from one another. The aside is `fixed`, so disagreement either
+    floats the rail over the content or opens a dead gap beside it.
+20. **Never let the Topbar hamburger's breakpoint drift from the aside's.** Both
+    are `md`. If the aside becomes a rail at `md` while the hamburger hides at
+    `sm`, 640–768px gets no navigation at all — no rail and no way to open one.
+21. **Never fade a `whitespace-nowrap` label to hide it in the collapsed rail.**
+    With no `overflow: hidden`, its flex minimum size is min-content, so an
+    `opacity-0` label still occupies full width — enough to shove a centred row's
+    icon clean off the 64px rail. Render it conditionally instead. Icon-first rows
+    survive this only because the icon is `shrink-0`.
+22. **Never let a control's accessible name come only from a label the collapsed
+    rail drops.** `writeGate.title` is `undefined` whenever writes are allowed, so
+    the Import button carries its own `aria-label`.
+23. **Never read `allSnapshots` outside `Home` and `AskAi`.** It is the unfiltered
+    set across every site. Every other page must use `snapshots`, which is narrowed
+    to `activeSite` — reading the wrong one silently mixes one site's numbers into
+    another site's page. One site is registered again, so the two sets currently
+    hold the same rows and the mistake is INVISIBLE rather than fixed: it costs
+    nothing to make today and surfaces as inflated totals — never as an error —
+    on whatever day a second property is registered.
+    Both exceptions narrow it themselves and must keep doing so: `Home` picks
+    between the two on `scoped`, and `AskAi` has its own site `<select>`, so
+    `buildAskAiContext` filters by `site.id` internally. Do not "correct" `AskAi`
+    to `snapshots` — that would make every site in its dropdown except the active
+    one answer "no data has been imported", which looks like missing data rather
+    than a wiring mistake.
+24. **Never remove a site from the registry once data exists under its id.**
+    `siteById` falls back to the default site for an unknown id, so orphaned
+    snapshots do not error — they silently merge into the default site's figures.
+    Asserted in `sites.test.ts`. Removing an entry is safe only while nothing has
+    been imported under it. **That carve-out has now been used:** the five Trybet
+    properties were removed by request, which was safe precisely because nothing
+    had ever been imported under their uuids. `HAZREVIEWS` is the only entry left.
+    Re-adding a property is one entry; deleting one after an import is a migration.
+
+    A corollary on names: two entries must not derive the same monogram, or the
+    site directory shows two identical tiles and reads as a duplicated row. No
+    entry needs an `abbr` today — one property cannot collide with itself — but
+    `siteInitials` stops at three words, so one brand registered twice
+    (`Haz Reviews (.ca)` and `Haz Reviews (.com)` both derive `HRC`) collides
+    immediately. `siteMonogram` prefers an entry's `abbr` and a test holds the
+    whole set distinct. Components call `siteMonogram`, never `siteInitials`.
+25. **Never give a page two headings.** The Topbar no longer supplies a title;
+    each page renders exactly one `<h1>` via `PageHeader` (or its own header row,
+    as `GroupView` does). A page with none is anonymous, and one with two reads as
+    two sections.
+26. **Never omit `@source not "../docs"`** from `src/index.css`, or Tailwind v4
     generates real CSS from class-looking strings inside committed markdown.
+27. **Never give the assistant's API key a `VITE_` prefix.** Vite inlines every
+    `VITE_*` variable into the client bundle, so the key would be readable in
+    devtools by anyone who loads the page. `OPENAI_API_KEY` is read in Node by
+    `vite/askAiProxy.ts` and nothing under `src/` may ever import a provider SDK.
+    Verified by grepping `dist/` for the key name and the provider host.
+28. **Never build Ask AI's request history from the visible transcript.** The
+    transcript holds the bare question; the data rides in the first user turn only.
+    Replaying what is on screen drops the data from turn two onward and the model
+    answers from nothing — fluently, with no error and no empty bubble. A turn
+    therefore keeps `wire` beside `content`, and `buildWireMessages` is the only
+    thing that assembles a payload. This shipped broken once: turn two reported 8
+    keywords not ranking when the real count was 1.
+29. **Never leave "which moved most" to the model.** `buildAskAiContext` ranks the
+    movers itself. Asked to derive it from the rows, the model named the
+    second-largest improvement — and the same numbers have to match the movers
+    panel anyway, which is invariant 16's rule applied to the assistant.
+
+30. **Never drop `[scrollbar-gutter:stable_both-edges]` from `<main>`.** The
+    shared shell scrolls the window; here `main` owns the scroll, so its
+    scrollbar is taken out of the box that centres every `max-w-*` page. Without
+    the reserved gutter the centred column sits half a scrollbar left of the
+    sibling dashboard's — the two look misaligned side by side even though every
+    card in them measures identically — and it slides sideways again between a
+    page that scrolls and one that does not. `both-edges`, not `stable`: one
+    edge is stable but still off-centre.
 
 ## Conventions
 
@@ -129,7 +203,13 @@ Violating any of these produces silent wrongness rather than an error.
 Vitest, node environment, `src/**/*.test.ts`. Coverage is concentrated on pure logic
 where silent data corruption would originate: `groups` (keyword matching),
 `parser` (including real xlsx and csv round-trips), `normalize`, `carryForward`,
-`dates`, `storage` (pagination maths), `useAuth` (write-gate derivation), `theme`.
+`dates`, `storage` (pagination maths), `useAuth` (write-gate derivation), `theme`,
+`askAiContext` (what the assistant is shown, and what is actually sent), `pageTitle`
+(the tab format, and that the base names the app rather than the registered
+property — which now shares its name, so the distinction is only visible in the
+test) and
+`assistant` (the NDJSON wire format — a dropped line loses part of an answer
+without erroring).
 
 `npm run build` is the primary regression net — `tsc -b` covers both projects.
 
@@ -140,5 +220,83 @@ provisioned during the build. Everything is type-checked, unit-tested, and verif
 rendering in a browser (shell, dark mode, `requireAuth` gate, load-error path), but
 the read/write round trip and RLS policies are unverified end to end. Do that first.
 
+`.env.local` still holds **placeholder** Supabase values, so no account can be
+created and nothing loads or saves. To fix: real URL + anon key, then run
+`supabase/setup.sql` → `auth-lockdown.sql` → `add-site-column.sql`, sign up through
+the app, and seed the first admin by hand — `handle_new_user` provisions every new
+row as `pending`/`is_admin=false`, and the `admin update user_access` policy needs
+an existing admin, so the first one is unreachable through the UI.
+
+Until then `VITE_DEV_FORCE_ADMIN=true` forces `isAdmin` and an account email so the
+admin nav group and the footer identity render with no backend. It is a
+convenience, not a security control — `import.meta.env.DEV` is statically false in
+a production build, so the branch is dropped entirely (verified: the flag name does
+not appear in `dist/`). `writeGate` is deliberately left alone, so a forced admin
+still reads "Sign in to make changes", which is true.
+
+`VITE_DEV_FORCE_FIXTURE=true` is the same idea for data: two weeks of stand-in
+snapshots for the registered property, so Home's cards, leaderboard, movers and
+dialogs render with real numbers. `devFixture.test.ts` compares its ids against
+the registry, so adding a property fails the suite until stand-in rows join it. Same `DEV` guard, verified the same way — neither the
+flag name nor the fixture keywords appear in `dist/`.
+
 `MARKET_ORDER` is `['AE']`, an explicit assumption — see §12 of the spec for the
 full list of decisions made without confirmation from the requestor.
+
+## Ask AI
+
+Works end to end in dev, verified against a live OpenAI key: streamed replies, a
+two-turn thread, the offline state, and a provider failure.
+
+- **`OPENAI_API_KEY` in `.env.local`, no `VITE_` prefix** (invariant 27), plus
+  optional `OPENAI_MODEL` (default `gpt-4o`) and `OPENAI_BASE_URL` (Azure or a
+  compatible proxy). Env is read once at server start — restart after editing.
+- **`vite/askAiProxy.ts`** is the whole server side: `apply: 'serve'`, so it does
+  not exist in a production build. `GET /api/ask-ai` is a readiness probe
+  answering `{assistant, model}`; `POST` streams NDJSON. The probe insists on a
+  JSON content-type because a static host answers an unknown path with
+  `index.html` and a 200, which a status-code check reads as success.
+- **A deployed build has no endpoint**, so the page reports itself offline until a
+  real function is deployed at the same path — a Supabase Edge Function is the
+  natural home. `src/lib/assistant.ts` is provider-blind, so that swap needs no
+  client change.
+- **Three outcomes arrive with HTTP 200** and are each surfaced rather than read as
+  success: a refusal, a `content_filter` finish, and `length` (truncation). On a
+  reasoning model, hidden reasoning tokens count against `max_completion_tokens`,
+  so truncation can cut the visible answer to nothing.
+- **The header does not display the model** (removed by request). The probe still
+  reports it, so it is one fetch away for a debug surface, but a typo in
+  `OPENAI_MODEL` now surfaces only as a provider error on the first question.
+- Accuracy is model-dependent. `gpt-4o-mini` answers correctly against the
+  precomputed movers block; asked to derive rankings from the rows itself it named
+  the wrong keyword (invariant 29).
+- **Two scopes.** The Site picker's first entry is `ALL_SITES`, the default, and
+  builds a per-site summary via `buildOverviewContext`; picking a site builds the
+  full row-level context. `ALL_SITES` is the empty string, matching the shared
+  markup. What makes that safe is the ORDERING, not the literal: `siteById` falls
+  back to the default site for an unknown id (invariant 24), so overview mode must
+  be decided before any registry lookup — never by asking what `''` resolves to. A
+  test asserts the sentinel can never collide with a registered site id.
+  Overview mode carries no keyword rows and says so in the context, or the model
+  answers keyword questions from a list it never received.
+- **The Site picker stays enabled mid-thread**, which is only safe because a turn
+  records its `scope` and `buildWireMessages` attaches the data for any scope the
+  thread has not seen yet. Do not pin the data to turn one again: switching the
+  picker would then relabel the view while every answer kept describing the
+  property the thread started on, and a stale answer reads exactly like a current
+  one. Covered by the scope-switch tests in `askAiContext.test.ts`.
+- **Every figure a reader might ask for is stated in the context, not left to be
+  counted.** Invariant 29's rule, and the overview learned it the same way: asked
+  "how many sites are tracked?" over a one-site portfolio it answered "ten", having
+  read the per-site keyword count as a site count. The header now names the count
+  and the sites outright.
+- **Starter chips come from `suggestionsFor`**, one set per scope, and every one
+  must be answerable from the context it ships with. The sibling dashboard's own
+  chips ask about domain rating, PageSpeed, traffic and QA checks — none of which
+  exist here — so three of the five were replaced rather than copied. A test
+  asserts no suggestion names absent data; keep it that way, or a chip becomes a
+  request spent to say "that is not in this import".
+- **The mic is Web Speech**, rendered only where a constructor exists (Firefox has
+  none). The transcript fills the draft and never auto-sends: recognition mishears,
+  and sending would spend a request on the wrong question. Note that Chrome
+  implements this by streaming audio to Google's speech service.

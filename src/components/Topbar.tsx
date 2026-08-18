@@ -1,102 +1,74 @@
-import { LogOut, Menu, Moon, Sun } from 'lucide-react'
-import type { Theme } from '../lib/theme'
+import { Menu } from 'lucide-react'
 
+/**
+ * The mobile header: the drawer trigger and the wordmark, on a filled navy bar.
+ *
+ * It exists only below `md`, where the rail is a drawer parked at
+ * `-translate-x-full` and this button is the only thing that opens it. Above
+ * `md` there is nothing left to render — titles moved into the pages
+ * (`PageHeader`), and the theme toggle was removed — so the whole header is
+ * `md:hidden` rather than an empty `banner` landmark a screen reader would
+ * still announce.
+ *
+ * NAVY, NOT `--surface`. The rail carries the brand on desktop; below `md` the
+ * rail is hidden, so a neutral bar would leave the app with no identity at all
+ * on the only viewport where the whole chrome collapses to one strip. The three
+ * brand hues are theme-independent by design, so this bar stays navy in dark
+ * mode — the same rule the HZ tile and the step badges follow.
+ *
+ * The wordmark is the rail's, not a second mark: the pills carry the two azure
+ * hues because navy-on-navy would be invisible, and they are `aria-hidden`
+ * because they are decoration beside a name that is already text.
+ *
+ * `aria-expanded` is why the open state has to be a prop. Without it the button
+ * announces as a plain button and nothing tells a screen-reader user that the
+ * drawer it controls is already open — `aria-controls` alone only names the
+ * target.
+ */
 interface TopbarProps {
-  title: string
-  subtitle: string
-  theme: Theme
-  onToggleTheme: () => void
+  /** Whether the drawer this button controls is currently open. */
+  open: boolean
   onOpenMobileNav: () => void
-  email: string | null
-  onSignIn: () => void
-  onSignOut: () => void
 }
 
-export function Topbar({
-  title,
-  subtitle,
-  theme,
-  onToggleTheme,
-  onOpenMobileNav,
-  email,
-  onSignIn,
-  onSignOut,
-}: TopbarProps) {
+export function Topbar({ open, onOpenMobileNav }: TopbarProps) {
   return (
     <header
-      className="flex h-16 min-h-[64px] shrink-0 flex-col"
-      style={{ background: 'var(--surface)', borderBottom: '1px solid var(--border-2)' }}
+      className="flex shrink-0 items-center gap-3 px-4 py-3 text-white md:hidden"
+      style={{
+        background: 'var(--brand-navy)',
+        borderBottom: '1px solid var(--brand-navy-deep)',
+      }}
     >
-      {/* Accent strip: three equal bands, navy → blue → light. */}
-      <div className="flex h-[3px] w-full shrink-0" aria-hidden>
-        <div className="flex-1" style={{ background: 'var(--brand-navy)' }} />
-        <div className="flex-1" style={{ background: 'var(--brand-blue)' }} />
-        <div className="flex-1" style={{ background: 'var(--brand-light)' }} />
-      </div>
+      <button
+        type="button"
+        onClick={onOpenMobileNav}
+        aria-label="Open navigation"
+        aria-controls="hz-rail"
+        aria-expanded={open}
+        className="topbar-trigger cursor-pointer rounded-md p-1.5"
+      >
+        <Menu size={22} />
+      </button>
 
-      <div className="flex flex-1 items-center gap-3 px-3 sm:px-7">
-        <button
-          type="button"
-          onClick={onOpenMobileNav}
-          aria-label="Open navigation"
-          className="sm:hidden"
-          style={{ color: 'var(--muted)' }}
-        >
-          <Menu size={18} />
-        </button>
-
-        <div className="min-w-0 flex-1">
-          <h1
-            className="truncate font-display text-[18px] font-semibold leading-tight sm:text-[26px]"
-            style={{ color: 'var(--ink)' }}
-          >
-            {title}
-          </h1>
-          <p className="truncate text-[11px]" style={{ color: 'var(--muted)' }}>
-            {subtitle}
-          </p>
-        </div>
-
-        <button
-          type="button"
-          onClick={onToggleTheme}
-          aria-label={theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}
-          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-colors"
-          style={{ border: '1px solid var(--border)', color: 'var(--muted)' }}
-        >
-          {theme === 'light' ? <Moon size={14} /> : <Sun size={14} />}
-        </button>
-
-        {email ? (
-          <div className="flex shrink-0 items-center gap-2">
-            <span
-              className="hidden max-w-[180px] truncate font-mono text-[10px] sm:block"
-              style={{ color: 'var(--muted)' }}
-              title={email}
-            >
-              {email}
-            </span>
-            <button
-              type="button"
-              onClick={onSignOut}
-              aria-label="Sign out"
-              className="flex h-8 w-8 items-center justify-center rounded-lg transition-colors"
-              style={{ border: '1px solid var(--border)', color: 'var(--muted)' }}
-            >
-              <LogOut size={14} />
-            </button>
-          </div>
-        ) : (
-          <button
-            type="button"
-            onClick={onSignIn}
-            className="shrink-0 rounded-lg px-3 py-1.5 text-[12px] font-semibold text-white"
-            style={{ background: 'var(--btn-ink)' }}
-          >
-            Sign in
-          </button>
-        )}
-      </div>
+      <span className="flex items-center gap-2.5">
+        <span aria-hidden className="flex items-center gap-1">
+          <span
+            className="h-[18px] w-1.5 rounded-full"
+            style={{ background: 'var(--brand-blue)' }}
+          />
+          <span
+            className="h-[18px] w-1.5 rounded-full"
+            style={{ background: 'var(--brand-light)' }}
+          />
+        </span>
+        {/* leading-none so the cap height, not the line box, sets the bar's
+            height — otherwise the wordmark pushes the strip taller than the
+            34px button beside it. */}
+        <span className="font-display text-[15px] font-bold leading-none tracking-widest">
+          HAZ REVIEWS
+        </span>
+      </span>
     </header>
   )
 }

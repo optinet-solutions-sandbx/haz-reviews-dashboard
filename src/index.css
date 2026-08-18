@@ -19,7 +19,6 @@
    hex; components reference var(--token). */
 :root {
   --page: #F5F7FA;
-  --grid-line: #E7ECF3;
   --surface: #FFFFFF;
   --surface-2: #FAFBFD;
   --surface-3: #F2F5F9;
@@ -29,6 +28,40 @@
   --border-2: #E4EAF2;
   --border-3: #EDF1F7;
   --border-strong: #C6D0DE;
+
+  /* ─── Reference neutrals ──────────────────────────────────────────────
+     `neutral-*` in the shared shell is NOT Tailwind's stock ramp. It is a custom
+     cool-grey ramp declared in `@optinet-solutions-sandbx/dashboard-ui`'s
+     tokens.css, so the class name is the only thing the two have in common. Every
+     value below is that ramp's, read out of the published token file.
+
+     They were previously the stock oklch greys, on the assumption that an
+     unprefixed Tailwind colour class meant the stock colour. It does not, and
+     zero-chroma grey beside a blue scheme is the exact mismatch the ramp exists to
+     avoid: #D4D4D4 against #cbd4e1, #525252 against #4c5972.
+
+     800 is the shell's body ink, which its own picker inherits rather than
+     declares. Ours cannot inherit it: this app's --ink is a deeper navy, and a
+     select's arrow is painted by the UA from the computed colour, so inheriting
+     rendered the chevron visibly bluer than the reference's. Matching the shell at
+     the body level would restyle every page, so the Ask AI chrome declares it.
+
+     ONLY the Ask AI chrome reads these; the rest of the app keeps its own --border
+     and --text tokens. */
+  --ref-neutral-100: #edf1f7;
+  --ref-neutral-200: #e1e7f0;
+  --ref-neutral-300: #cbd4e1;
+  --ref-neutral-500: #636f86;
+  --ref-neutral-600: #4c5972;
+  --ref-neutral-800: #232b3d;
+  /* 50 is the shell's page ground, which its composer uses as a hover wash and as
+     the disabled input's fill. --surface-3 stood in for it and is a shade cooler. */
+  --ref-neutral-50: #f5f7fb;
+  /* The one non-neutral read from the shell: `primary-800`, the Send button's
+     hover. Theme-independent for the same reason as the brand hues below — the
+     button's resting fill is --brand-navy in both themes, so a hover that only
+     existed in light would make the control behave differently in dark. */
+  --ref-primary-800: #18225a;
 
   --ink: #101A2E;
   --ink-2: #1E293B;
@@ -43,10 +76,28 @@
   --brand-light: #7FD4F5;
   --navy-text: #1E2A6E;
   --brand-blue-deep: #1580B8;
+  /* accent-700 — the deep end of the azure ramp, for a filled card carrying
+     white text. Theme-independent like the three brand hues above: a filled
+     brand surface must not change colour between themes, or the pair of hero
+     cards stops reading as one set. 6.4:1 against white. */
+  --brand-blue-700: #12658F;
+  /* The navy ramp either side of --brand-navy, for the one surface that is a
+     filled navy bar rather than a small chip: the mobile header. Its hairline
+     has to be darker navy — --border-2 is a light neutral and disappears against
+     the fill — and its hover has to lift, which a white alpha wash cannot do
+     without greying the navy underneath. Theme-independent for the same reason
+     as the three hues above: a filled brand surface must not change colour
+     between themes. */
+  --brand-navy-deep: #16205A;
+  --brand-navy-hover: #2A3892;
 
   --btn-ink: #101A2E;
   --btn-ink-hover: #1E2A6E;
   --active-tint: #EAF4FC;
+  /* Navy-leaning companion to --active-tint, which is azure. Grounds the account
+     avatar, where the glyph is --navy-text rather than --brand-blue, so an azure
+     tint would sit under a navy figure. */
+  --navy-tint: #EEF1FB;
 
   --pos: #0F7A3D;
   --pos-surface: #E8F6EE;
@@ -63,6 +114,11 @@
 
   --scrollbar: #C6D0DE;
   --scrollbar-hover: #A9B6C8;
+
+  /* Navy-tinted rather than black, which is what keeps a raised surface reading
+     as part of the palette instead of a grey smudge over it. */
+  --shadow-card: 0 1px 2px rgba(20, 25, 38, 0.05);
+  --shadow-modal: 0 12px 30px rgba(30, 42, 110, 0.16);
 
   /* ─── Tier 2 · matrix tokens ─────────────────────────────────────────
      HARD CONSTRAINT: every --mx-* background must be fully opaque in both
@@ -109,7 +165,6 @@
 
 .dark {
   --page: #0A0E15;
-  --grid-line: #141B27;
   --surface: #131A26;
   --surface-2: #172030;
   --surface-3: #1C2634;
@@ -119,6 +174,17 @@
   --border-2: #232E40;
   --border-3: #1E2836;
   --border-strong: #3A4860;
+
+  /* No reference to match in dark — the sibling has no dark theme — so these
+     defer to this app's own borders. Keeping the light greys would put a
+     near-white edge on a near-black surface. */
+  --ref-neutral-100: var(--border-3);
+  --ref-neutral-200: var(--border-2);
+  --ref-neutral-300: var(--border);
+  --ref-neutral-500: var(--muted);
+  --ref-neutral-600: var(--text-2);
+  --ref-neutral-800: var(--ink);
+  --ref-neutral-50: var(--hover);
 
   --ink: #E8EDF6;
   --ink-2: #D3DCEA;
@@ -133,6 +199,7 @@
   --btn-ink: #1C9FE0;
   --btn-ink-hover: #2AAEEF;
   --active-tint: #16283A;
+  --navy-tint: #1D2440;
 
   --pos: #35CE86;
   --pos-surface: #102B1E;
@@ -149,6 +216,11 @@
 
   --scrollbar: #2F3C52;
   --scrollbar-hover: #3F5069;
+
+  /* Heavier in dark: a 5%-black shadow over a near-black page is invisible, so
+     the hover lift would have no depth cue at all. */
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-modal: 0 12px 30px rgba(0, 0, 0, 0.55);
 
   /* Navy-anchored solids. Still fully opaque — see the constraint above. */
   --mx-bg: #121A27;
@@ -221,10 +293,151 @@ body {
 .animate-toast-in { animation: toastIn 0.2s ease-out both; }
 .animate-bar-rise { animation: barRise 0.4s ease-out both; transform-origin: bottom; }
 
-/* Dark text on light surfaces: recolour plus a halo. */
-.text-glow:hover {
+/* Dark text on light surfaces: recolour plus a halo. The second selector is what
+   lets a nav label glow from anywhere on its row instead of only from the few
+   pixels of text under the cursor — the row owns the hover, the label reacts. */
+.text-glow:hover,
+.nav-row:hover .text-glow {
   color: var(--brand-blue);
   text-shadow: 0 0 6px rgba(28, 159, 224, 0.55), 0 0 2px rgba(28, 159, 224, 0.45);
+}
+
+/* Row hover lives here rather than inline because an inline style cannot express
+   a hover state at all. Keying the exclusion on [aria-current] rather than a
+   second class means the visual state and the accessible state cannot drift
+   apart: a row that stops looking hoverable is exactly a row marked current.
+
+   Ground only — the left border stays transparent until the row is actually
+   current, so the azure edge means "you are here" and never "your cursor is
+   here". */
+.nav-row:hover:not([aria-current]) {
+  background: var(--hover);
+}
+
+/* The rail's collapse toggle. Everything except its animating `left` lives here
+   so the hover state is expressible — an inline `border` shorthand carries a
+   colour, and would win over any rule trying to recolour it. */
+.rail-toggle {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  /* Navy-tinted rather than black, matching the card shadow in the shared
+     visual system. Near-invisible in dark mode, which is correct — the rail
+     already separates from the page by its own border there. */
+  box-shadow: 0 1px 2px rgba(20, 25, 38, 0.06);
+}
+.rail-toggle:hover {
+  border-color: var(--brand-blue);
+  color: var(--navy-text);
+}
+
+/* Site card. Every hover here lives in CSS because an inline style cannot express
+   one, and the card's own surface/border must move too — so the resting look is
+   declared here rather than inline, keeping all four states in one place. */
+.site-card {
+  background: var(--surface);
+  border: 1px solid var(--border-2);
+  box-shadow: var(--shadow-card);
+}
+.site-card:hover {
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-modal);
+  transform: translateY(-2px);
+}
+/* The title recolours from a hover anywhere on the card: the stretched
+   pseudo-element makes the whole surface the link's hit area, so :hover on the
+   anchor already covers it. */
+.site-card-link:hover { color: var(--brand-blue-deep); }
+.site-tool:hover { background: var(--hover); color: var(--ink); }
+
+/* The mobile header's drawer trigger. Here rather than inline for the usual
+   reason — a `style` attribute cannot express `:hover` — and the ground is a
+   step up the navy ramp rather than a white alpha wash, which would desaturate
+   the bar it sits on instead of brightening it. No focus rule: the global
+   azure ring already reads against navy. */
+.topbar-trigger:hover { background: var(--brand-navy-hover); }
+
+/* Ask AI's starter questions. Here rather than inline because an inline `style`
+   cannot express `:hover`, and the chip's resting colours are token-driven. */
+.suggestion-chip:hover:not(:disabled) { background: var(--hover); border-color: var(--border-2); }
+
+/* Ask AI's site picker, matched to the shared shell's control.
+
+   Everything resting lives here rather than in an inline `style` for two reasons:
+   an inline declaration outranks any stylesheet rule, so the focus tint below could
+   never retint the border; and it keeps the element's markup class-only, the same
+   shape as the shared version.
+
+   THE ARROW is the UA's. The shared shell does not run a forms reset on this
+   control, so its select is `appearance: auto` and the chevron inside it is drawn
+   by the OS — there is no SVG to copy. An earlier version of this rule reset the
+   appearance and painted its own; it matched every measurable value in the spec
+   and still read as a different silhouette, because none of those values describe
+   the arrow.
+
+   `background-color` is set on its own rather than through the `background`
+   shorthand. Nothing paints an image here now, but the shorthand would silently
+   drop one if a later edit added it back. */
+.ask-ai-site {
+  background-color: var(--surface);
+  /* The reference's `border-neutral-300`, not this app's tinted --border. */
+  border-color: var(--ref-neutral-300);
+  /* The shell's body ink, NOT this app's --ink. The UA paints the arrow from the
+     computed colour, so the deeper navy read as a bluer chevron than the
+     reference's — the one visible difference left in an otherwise matched control.
+     Dark maps this token back to --ink, so the theme still tracks by itself. */
+  color: var(--ref-neutral-800);
+}
+/* The shell has no dark theme, so this pairing is ours alone. Without it the UA
+   paints a light-mode widget: a near-black arrow on a near-black surface, and a
+   white option popup dropping out of a dark header. */
+.dark .ask-ai-site {
+  color-scheme: dark;
+}
+
+.ask-ai-site:focus-visible {
+  /* Replaces the global outline rather than adding to it — see the ring below. */
+  outline: none;
+  border-color: var(--brand-blue);
+  box-shadow: 0 0 0 2px var(--brand-blue);
+}
+/* The reference's `text-neutral-600`. Its own chrome classes, kept off the element
+   so the markup stays class-only like the reference's. */
+.ask-ai-site-label { color: var(--ref-neutral-600); }
+.ask-ai-header { border-color: var(--ref-neutral-100); }
+.ask-ai-title { color: var(--navy-text); }
+.ask-ai-note { color: var(--ref-neutral-500); }
+
+/* Ask AI's composer, same reasoning as the picker above: the resting colours have
+   to leave the `style` attribute before a `:focus` or `:hover` rule can retint
+   them, because an inline declaration outranks every stylesheet rule.
+
+   The reference's input is `focus:`, not `focus-visible:`. Kept as-is: for a text
+   field the two fire together anyway, and the narrower one would drop the tint on
+   a pointer click, which is how this field is usually focused. */
+.ask-ai-input {
+  background-color: var(--surface);
+  border-color: var(--ref-neutral-200);
+  color: var(--ref-neutral-800);
+}
+/* Keyed on :disabled, not on `ready`, so the wash also covers the in-flight
+   moment. The old inline background missed it: the field was disabled while a
+   question streamed but stayed white, reading as editable. */
+.ask-ai-input:disabled { background-color: var(--ref-neutral-50); }
+.ask-ai-input:focus { border-color: var(--brand-navy); }
+
+.ask-ai-send { background-color: var(--brand-navy); }
+/* `:not(:disabled)` on both hovers. The reference omits it, so its dead Send
+   button and dead Summarize row still light up under the cursor at 40% opacity —
+   an affordance on a control that cannot act. */
+.ask-ai-send:hover:not(:disabled) { background-color: var(--ref-primary-800); }
+
+/* One global focus ring, so almost nothing declares its own. `:where()` holds
+   specificity at zero: a component that genuinely needs a different ring
+   overrides this without reaching for !important. */
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--brand-blue);
+  outline-offset: 2px;
 }
 /* Light text on navy: halo only, so the text stays white. */
 .text-glow-light:hover {
