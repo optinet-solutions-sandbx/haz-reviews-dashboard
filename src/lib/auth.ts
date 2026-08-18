@@ -1,12 +1,15 @@
+import { resolveRequireAuth } from './devOverrides'
 import { supabase } from './supabase'
 
 /**
  * When true the whole app is gated behind sign-in plus admin approval.
  *
  * This project runs with it ON — nothing here is public. It stays a flag so a
- * local developer can turn the gate off without editing code.
+ * local developer can turn the gate off without editing code, and a demo build
+ * forces it off outright: see `resolveRequireAuth`, which is where the rule and
+ * its test live because this module cannot be imported without credentials.
  */
-export const REQUIRE_AUTH = import.meta.env.VITE_REQUIRE_AUTH === 'true'
+export const REQUIRE_AUTH = resolveRequireAuth(import.meta.env)
 
 export async function signIn(email: string, password: string): Promise<void> {
   const { error } = await supabase.auth.signInWithPassword({ email, password })

@@ -1,15 +1,23 @@
 import type { RankingRecord, Snapshot, SnapshotMeta } from '../types'
 import { formatDisplayDate } from './dates'
-import type { DevEnv } from './devOverrides'
+import { isDemoBuild, type DevEnv } from './devOverrides'
 
 /**
  * LOCAL DEVELOPMENT ONLY — stand-in snapshots so Home's cards, leaderboard,
  * movers and dialogs can be seen with real numbers while Supabase is still on
  * placeholder credentials.
  *
- * Guarded exactly like `devOverrides.ts`: `import.meta.env.DEV` is statically
- * false in a production build, so this branch and its data are dropped by the
- * bundler. Never make the flag alone sufficient.
+ * Two unlocks, exactly as in `devOverrides.ts`: `DEV` + `VITE_DEV_FORCE_FIXTURE`
+ * locally, or `VITE_DEMO_MODE` for the deployed demo. Never make the dev flag
+ * alone sufficient — the `DEV` guard is what stops a stray local variable from
+ * conjuring fake ranking data into a real dashboard.
+ *
+ * Note what that guard does NOT do. It makes this data inert in a normal
+ * production build; it does not remove it. `resolveDevFixture` reads `DEV` off a
+ * parameter, so Rollup cannot prove the early return, and the rows below ship in
+ * every bundle — grep `dist/` for 'example.com' and they are there. Acceptable
+ * at a few kB, and it is why demo mode costs no bundle size, but do not restate
+ * the old claim that the bundler drops them.
  *
  * The keywords are real brands from the group registry, so `groupForKeyword`
  * resolves them and the grouped views populate too. Positions are chosen to
@@ -109,8 +117,10 @@ export interface DevFixture {
 }
 
 export function resolveDevFixture(env: DevEnv & { VITE_DEV_FORCE_FIXTURE?: string }): DevFixture | null {
-  if (!env.DEV) return null
-  if (env.VITE_DEV_FORCE_FIXTURE !== 'true') return null
+  if (!isDemoBuild(env)) {
+    if (!env.DEV) return null
+    if (env.VITE_DEV_FORCE_FIXTURE !== 'true') return null
+  }
   return {
     snapshots: SNAPSHOTS,
     meta: SNAPSHOTS.map(({ id, site, rawDate, displayDate }) => ({
@@ -122,5 +132,5 @@ export function resolveDevFixture(env: DevEnv & { VITE_DEV_FORCE_FIXTURE?: strin
   }
 }
 
-/** Resolved once at module load; `null` in every production build. */
+/** Resolved once at module load; `null` unless a dev flag or demo mode says so. */
 export const DEV_FIXTURE = resolveDevFixture(import.meta.env)

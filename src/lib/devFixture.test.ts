@@ -72,3 +72,34 @@ describe('the fixture exercises the Home page', () => {
     expect(down.length).toBeGreaterThan(0)
   })
 })
+
+describe('resolveDevFixture in demo mode', () => {
+  const demo = { DEV: false, VITE_DEMO_MODE: 'true' }
+
+  /**
+   * What makes the deployed demo show numbers instead of "could not reach the
+   * database". Deliberately NOT reachable through VITE_DEV_FORCE_FIXTURE — the
+   * guard test above must keep passing, so a leftover local flag in a deployed
+   * environment still conjures nothing.
+   */
+  it('ships the fixture in a production build', () => {
+    expect(resolveDevFixture(demo)?.snapshots.length).toBeGreaterThan(0)
+  })
+
+  // One flag, not two: the deployed build sets VITE_DEMO_MODE and nothing else.
+  it('does not need the dev flag alongside it', () => {
+    expect(resolveDevFixture({ VITE_DEMO_MODE: 'true' })).not.toBeNull()
+  })
+
+  it('is off unless the flag is exactly true', () => {
+    expect(resolveDevFixture({ DEV: false, VITE_DEMO_MODE: 'false' })).toBeNull()
+    expect(resolveDevFixture({ DEV: false, VITE_DEMO_MODE: '' })).toBeNull()
+    expect(resolveDevFixture({ DEV: false, VITE_DEMO_MODE: '1' })).toBeNull()
+  })
+
+  // The demo and dev paths must ship the SAME data, or the deployed demo is
+  // exercising rows no test above ever asserted anything about.
+  it('ships the same snapshots the dev path does', () => {
+    expect(resolveDevFixture(demo)).toEqual(resolveDevFixture(on))
+  })
+})
