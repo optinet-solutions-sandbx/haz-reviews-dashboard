@@ -1,3 +1,10 @@
+// `.js`, not extensionless and not `.ts`. Vercel transpiles each file here
+// separately rather than bundling them, and package.json declares
+// `"type": "module"`, so Node's own resolver handles this specifier and requires a
+// real extension — one naming the EMITTED file. Extensionless resolves fine in dev,
+// where Vite resolves it and Node never sees it, then fails in production with
+// ERR_MODULE_NOT_FOUND and a 500 on every request. Asserted by
+// server/nodeEsm.test.ts, because no build or type-check catches it.
 import {
   isAskAiRequest,
   probeBody,
@@ -5,7 +12,7 @@ import {
   streamAskAi,
   UNCONFIGURED,
   type AskAiEvent,
-} from '../server/askAi'
+} from '../server/askAi.js'
 
 /**
  * PRODUCTION endpoint for Ask AI, and the deployed counterpart to

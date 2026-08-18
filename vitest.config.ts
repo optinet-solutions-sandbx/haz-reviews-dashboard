@@ -11,7 +11,9 @@ import { defineConfig } from 'vitest/config'
 export default defineConfig({
   test: {
     environment: 'node',
-    include: ['src/**/*.test.ts'],
+    // server/ is included but api/ deliberately is not: Vercel publishes every file
+    // under api/ as a function, so a test file there would become an endpoint.
+    include: ['src/**/*.test.ts', 'server/**/*.test.ts'],
     env: {
       VITE_SUPABASE_URL: 'https://test.supabase.co',
       VITE_SUPABASE_ANON_KEY: 'test-anon-key',
