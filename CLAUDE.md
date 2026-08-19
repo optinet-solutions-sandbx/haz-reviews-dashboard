@@ -580,9 +580,12 @@ dist/` finds them. The behaviour was never wrong; the size claim was. It costs a
 few kB, and it is why demo mode costs no bundle size at all.
 
 `VITE_DEMO_MODE=true` is the deployed counterpart: ONE flag that turns on the
-fixture and the forced admin together, and forces the auth gate off. It exists
-because the deployed demo has no backend whatsoever — no session is obtainable
-there, so without it nothing would render. It is deliberately a SEPARATE flag from
+fixture and the forced admin together, and forces the auth gate off. It is NOT in
+use any more — production was switched to the real Supabase project on 2026-08-19
+and the flag was removed there — so read the rest of this paragraph as what the
+flag still DOES, not as a description of what is deployed. It exists for a
+deployment with no backend whatsoever, where no session is obtainable and without
+it nothing would render. It is deliberately a SEPARATE flag from
 the two above rather than a lifted `DEV` guard, and that is the whole point: it is
 what keeps "a stray `VITE_DEV_FORCE_*` in a deployed environment does nothing"
 true. `resolveRequireAuth` forces the gate off in a demo build rather than
@@ -672,22 +675,35 @@ account. `vercel.json` carries two things: the SPA rewrite (every path to
 would otherwise 404) and a 60-second `maxDuration` for `api/ask-ai.ts` — the
 default 10 seconds can cut a long streamed answer off mid-sentence.
 
-The live deployment is a **frontend** demo: `VITE_DEMO_MODE=true`, no Supabase
-project behind it. Its environment variables:
+**DEMO MODE WAS RETIRED on 2026-08-19.** The live deployment is now the REAL
+gated app, pointed at Supabase project `lplcodzxneqbubzsgfnv` — the same one
+`.env.local` uses. It is no longer a public frontend demo, and this section
+described one until that date. Its environment variables:
 
 | Variable | Value | Why it is needed |
 |---|---|---|
-| `VITE_SUPABASE_URL` | placeholder URL | `supabase.ts` throws at module load without it, so the app white-screens — even though demo mode never issues a query |
-| `VITE_SUPABASE_ANON_KEY` | placeholder | same |
-| `VITE_DEMO_MODE` | `true` | fixture data, forced admin, gate off |
-| `OPENAI_API_KEY` | real key, **never `VITE_`-prefixed** | invariant 27 — a `VITE_` variable is inlined into the bundle |
+| `VITE_SUPABASE_URL` | real project URL | the data path; `supabase.ts` throws at module load without it and the app white-screens |
+| `VITE_SUPABASE_ANON_KEY` | real anon key | same. Public by design and inlined into the bundle — RLS is what protects the data (invariant 10) |
+| `VITE_REQUIRE_AUTH` | `true` | the whole app sits behind sign-in plus admin approval |
+| `OPENAI_API_KEY` | absent today | Ask AI reports itself offline until one is added, which is the probe working as designed |
 | `OPENAI_MODEL` | optional, e.g. `gpt-4o-mini` | defaults to `gpt-4o` |
-| `ASK_AI_REQUIRE_AUTH` | `false` on a demo; ABSENT on a real deployment | a demo has no session to verify, so its assistant only works with the endpoint's own gate opted out — and since absence means required, a real deployment sets nothing at all (invariant 34) |
+| `ASK_AI_REQUIRE_AUTH` | **ABSENT**, and must stay absent | absence means REQUIRED (invariant 34). It was `false` under demo mode because a demo can hold no session; leaving it behind on a real deployment would reopen an anonymous OpenAI proxy |
 
-`VITE_REQUIRE_AUTH` is deliberately absent: `resolveRequireAuth` ignores it in a
-demo build.
+`VITE_DEMO_MODE` is **gone**, not set to `false`. Only the exact string `'true'`
+enables it, so either works — but an absent flag cannot be misread by whoever
+edits this next.
 
-Those three are set on **Production only**. Vercel CLI 54 cannot target "all
+Two traps if you ever set these again. `vercel env add` reads the value from
+STDIN, and **piping it in silently stores an empty string** — the variable is
+created, `vercel env ls` shows it as "Encrypted", and the deploy white-screens
+because `supabase.ts` throws with no URL. Use a redirect from a file
+(`vercel env add NAME production < file`) and never trust the "Added" line alone.
+Then note that `vercel env pull` **cannot read encrypted values back** — it writes
+`NAME=""` for every one of them, which looks exactly like the empty-value bug and
+is not. The only honest check is the built artefact: deploy, then grep the live
+JS asset for the project ref. That is how both states above were told apart.
+
+Those are set on **Production only**. Vercel CLI 54 cannot target "all
 Preview branches" non-interactively — it demands a specific branch name — so a
 preview deployment currently white-screens, because `supabase.ts` throws at module
 load without the two placeholders. Fix it in the dashboard when you first need a
@@ -697,10 +713,10 @@ The GitHub repo is connected, so every push to `master` redeploys to production.
 `vercel --prod` from a working copy does the same thing without a push.
 
 **The assistant endpoint authorizes its own callers** as of 2026-08-19, so it is no
-longer world-callable — see invariant 34. Two things still follow from that rather
-than being solved by it. A demo build has no session to present, so a demo that
-wants a working assistant has to set `ASK_AI_REQUIRE_AUTH=false` and is then
-spending on anonymous callers again: give that deployment a capped or throwaway
-key, or leave it with no key at all and let the page report itself offline. And the
+longer world-callable — see invariant 34. With demo mode retired the deployment can
+finally present a real session, so `ASK_AI_REQUIRE_AUTH` stays absent and the gate
+does its job; the old advice to set it `false` applied to the demo only and must
+not be carried forward. Adding `OPENAI_API_KEY` is what turns Ask AI on there, and
+that is the moment the endpoint can start spending: the
 rate limit is per-instance and in memory, so the only hard spend ceiling is a cap
 set on the key at the provider.
