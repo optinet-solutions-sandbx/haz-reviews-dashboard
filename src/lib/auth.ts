@@ -16,6 +16,21 @@ export async function signIn(email: string, password: string): Promise<void> {
   if (error) throw new Error(error.message)
 }
 
+/**
+ * NOTE ON WHAT IS UNREACHABLE FROM THE UI, as of 2026-08-19.
+ *
+ * `/login` was ported to the shell's login spec, which is sign-in only, so
+ * `signUp`, `signInWithGoogle` and `sendPasswordReset` below have no caller in
+ * `src/`. They are kept rather than deleted because each corresponds to a flow that
+ * still exists on the Supabase side and is a UI change away from returning:
+ * accounts are created in the dashboard today, a reset link is triggered there too,
+ * and `/reset-password` — which DOES have a caller, `updatePassword` — handles
+ * whatever that link produces.
+ *
+ * Do not add a Google button back without first configuring the provider in the
+ * Supabase project: `signInWithOAuth` throws `Unsupported provider` until then.
+ */
+
 export async function signUp(email: string, password: string): Promise<void> {
   const { error } = await supabase.auth.signUp({ email, password })
   if (error) throw new Error(error.message)
