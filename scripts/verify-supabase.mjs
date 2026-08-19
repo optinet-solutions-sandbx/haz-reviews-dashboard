@@ -71,8 +71,17 @@ async function main() {
 
   const BASE = (env.VITE_SUPABASE_URL || '').replace(/\/+$/, '')
   const ANON = env.VITE_SUPABASE_ANON_KEY || ''
-  const PASSWORD = process.env.ADMIN_PASSWORD || ''
-  const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'admin@dashboard.com'
+  // The real environment WINS over .env.local, so a one-off run or a CI job can
+  // override the file without editing it. Falling back to .env.local is what lets
+  // `npm run verify:supabase` work with no argument juggling.
+  //
+  // Safe here in a way it would never be in the app: this file runs in Node and
+  // reads .env.local off disk itself. Vite only inlines `VITE_`-prefixed names into
+  // the client bundle, so an unprefixed password is invisible to the browser. See
+  // invariant 40 — the rule is about a password reaching the CLIENT, not about the
+  // file.
+  const PASSWORD = process.env.ADMIN_PASSWORD || env.ADMIN_PASSWORD || ''
+  const ADMIN_EMAIL = process.env.ADMIN_EMAIL || env.ADMIN_EMAIL || 'admin@dashboard.com'
 
   if (!BASE || !ANON) {
     console.error('VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY missing from .env.local.')
