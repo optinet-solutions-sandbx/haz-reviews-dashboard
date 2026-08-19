@@ -50,7 +50,18 @@ export async function probeAssistant(signal?: AbortSignal): Promise<AssistantSta
     }
     const reason = (body as { reason?: unknown }).reason
     return { state: 'offline', reason: typeof reason === 'string' ? reason : OFFLINE_NO_ENDPOINT }
-  } catch {
+  } catch (err) {
+    // An abort is not a verdict on the endpoint: it means the caller stopped
+    // wanting this answer. Turning it into a status lets a CANCELLED probe
+    // overwrite the live one's, and under StrictMode's double mount there is
+    // always exactly one cancelled probe — so a perfectly good key rendered
+    // "Assistant offline" on whichever loads the aborted request settled last.
+    // Rethrow, so a cancellation can never reach state at all.
+    //
+    // Read `name` off the value instead of narrowing with `instanceof Error`:
+    // browsers reject with a DOMException, whose inheritance from Error was only
+    // specified later, and a false negative here silently restores the bug.
+    if ((err as { name?: unknown } | null)?.name === 'AbortError') throw err
     return { state: 'offline', reason: OFFLINE_NO_ENDPOINT }
   }
 }
@@ -70,10 +81,25 @@ export async function streamAssistant(opts: {
   messages: AssistantTurn[]
   onText: (chunk: string) => void
   signal?: AbortSignal
+  /**
+   * The caller's Supabase access token, for the endpoint's own authorization check.
+   *
+   * Passed in rather than read here: this module must not import the Supabase
+   * client, which throws at module load without credentials — the same constraint
+   * that put `resolveRequireAuth` in devOverrides.ts — and importing it would make
+   * this file impossible to unit-test.
+   */
+  token?: string
 }): Promise<{ refused: boolean; truncated: boolean }> {
   const res = await fetch(ASK_AI_ENDPOINT, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      // Omitted rather than sent empty: `Bearer ` with no credential is malformed,
+      // and a proxy may reject it before the endpoint can answer with its own
+      // readable "Sign in to use the assistant."
+      ...(opts.token ? { Authorization: `Bearer ${opts.token}` } : {}),
+    },
     body: JSON.stringify({ system: opts.system, messages: opts.messages }),
     signal: opts.signal,
   })

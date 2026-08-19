@@ -99,6 +99,36 @@ describe('probeAssistant', () => {
     vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('ECONNREFUSED') }))
     expect((await probeAssistant()).state).toBe('offline')
   })
+
+  /**
+   * StrictMode mounts the page twice, so the first probe is ALWAYS aborted by the
+   * effect's cleanup while still in flight. An abort is not a verdict on the
+   * endpoint — it means "this answer is no longer wanted" — so it must never
+   * become a status. Translating it into `offline` makes the cancelled probe race
+   * the live one, and whichever settles last wins.
+   *
+   * This shipped: with a valid key the page rendered "Assistant offline" with the
+   * composer disabled on roughly every other load, which reads as a missing key
+   * rather than as a race. Verified in a browser — two requests to /api/ask-ai,
+   * one ERR_ABORTED and one 200, with the aborted one deciding the UI.
+   */
+  it('rejects rather than reporting offline when the probe is aborted', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        (_url: string, init: RequestInit) =>
+          new Promise((_resolve, reject) => {
+            init.signal?.addEventListener('abort', () => {
+              reject(new DOMException('The operation was aborted.', 'AbortError'))
+            })
+          }),
+      ),
+    )
+    const controller = new AbortController()
+    const pending = probeAssistant(controller.signal)
+    controller.abort()
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' })
+  })
 })
 
 describe('streamAssistant', () => {
@@ -214,5 +244,54 @@ describe('streamAssistant', () => {
     )
     await run()
     expect(seen.join('')).toBe('still here')
+  })
+})
+
+/**
+ * The endpoint verifies a Supabase session before it will spend anything, so the
+ * caller's token has to reach it. Asserted on the outgoing request rather than on a
+ * mock's call log: a header that is built but not attached would satisfy the latter.
+ *
+ * `assistant.ts` deliberately does not import the Supabase client to fetch this
+ * itself — that module throws at module load without credentials, which is exactly
+ * why devOverrides.ts exists, and importing it here would make this file
+ * untestable. The token is passed in.
+ */
+describe('streamAssistant authorization', () => {
+  function recordingFetch(res: Response) {
+    const seen: Array<Record<string, string>> = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: string, init: RequestInit) => {
+        seen.push((init.headers ?? {}) as Record<string, string>)
+        return res
+      }),
+    )
+    return seen
+  }
+
+  const run = (token?: string) =>
+    streamAssistant({
+      system: 's',
+      messages: [{ role: 'user', content: 'q' }],
+      onText: () => {},
+      token,
+    })
+
+  it('sends the session token as a bearer credential', async () => {
+    const seen = recordingFetch(ndjson(['{"type":"done"}\n']))
+    await run('a.token')
+    expect(seen[0].Authorization).toBe('Bearer a.token')
+  })
+
+  /**
+   * Omitted rather than sent empty. `Authorization: Bearer ` is a malformed
+   * credential, and a gateway may reject it before the endpoint gets to answer with
+   * its own, readable "sign in" message.
+   */
+  it('omits the header entirely when there is no session', async () => {
+    const seen = recordingFetch(ndjson(['{"type":"done"}\n']))
+    await run(undefined)
+    expect('Authorization' in seen[0]).toBe(false)
   })
 })

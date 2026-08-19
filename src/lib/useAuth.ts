@@ -20,7 +20,19 @@ export interface UseAuthResult {
   isAdmin: boolean
   accessLoading: boolean
   refreshAccess: () => Promise<boolean>
+  /**
+   * The current access token, or null when signed out. For `/api/ask-ai`, which
+   * verifies the session server-side before it will spend anything.
+   *
+   * Async and asked for per call, deliberately. An access token is short-lived and
+   * Supabase rotates it; reading `session.access_token` out of render state would
+   * hand out whatever was current at the last render, so a tab left open long
+   * enough would start sending an expired one and the assistant would answer
+   * "your session has expired" to someone who is plainly signed in.
+   */
+  getAccessToken: () => Promise<string | null>
 }
+
 
 /**
  * Session + approval state, plus the pending-action gate.
@@ -176,6 +188,14 @@ export function useAuth(): UseAuthResult {
     setModalOpen(false)
   }, [])
 
+  // getSession() rather than the `session` state: it returns a valid token,
+  // refreshing it first if the current one has expired. Empty deps, so this keeps a
+  // stable identity like requireAuth does and never re-triggers a caller's effect.
+  const getAccessToken = useCallback(
+    async () => (await supabase.auth.getSession()).data.session?.access_token ?? null,
+    [],
+  )
+
   const refreshAccess = useCallback(
     () => lookupAccess(sessionRef.current?.user.id ?? null),
     [lookupAccess],
@@ -193,7 +213,9 @@ export function useAuth(): UseAuthResult {
     isAdmin,
     accessLoading,
     refreshAccess,
+    getAccessToken,
   }
+
 }
 
 /**
@@ -215,4 +237,43 @@ export function getWriteGate(
   if (accessLoading) return { disabled: false, editDisabled: false }
   if (!isApproved) return { disabled: true, editDisabled: true, title: 'Awaiting admin approval' }
   return { disabled: false, editDisabled: false }
+}
+
+export interface IdentityGate {
+  /** The address to display, or null when there is none to show. */
+  email: string | null
+  /** Whether ending the session is a thing that can actually happen. */
+  canSignOut: boolean
+}
+
+/**
+ * What the sidebar footer shows, and which action it offers.
+ *
+ * The two answers come from DIFFERENT sources, and conflating them is what made
+ * "Sign out" a dead button. The footer used to decide it was signed in whenever
+ * it had an address to render, but `DEV_OVERRIDE` forces an address precisely so
+ * the signed-in surfaces render with no backend — so a forced identity selected
+ * the signed-in branch with no session behind it. Clicking then called
+ * `supabase.auth.signOut()`, which short-circuits when there is nothing to sign
+ * out of: no request, no error, no state change, nothing on screen. It reads as a
+ * broken control rather than as a configuration that has no session to end.
+ *
+ * So: the LABEL may be forced, because that is what the override is for. The
+ * ACTION follows the session, which cannot be forced.
+ *
+ * Never treat this as security (invariant 10). It decides which of two buttons to
+ * draw.
+ */
+export function getIdentityGate(
+  session: Session | null,
+  overrideEmail: string | null,
+): IdentityGate {
+  return {
+    // The override wins the label deliberately — a developer who set
+    // VITE_DEV_FORCE_EMAIL to check truncation wants to see that address.
+    email: overrideEmail ?? session?.user.email ?? null,
+    // Tracks the session and nothing else. An emailless session is still a
+    // session, and a forced address is still not one.
+    canSignOut: session !== null,
+  }
 }

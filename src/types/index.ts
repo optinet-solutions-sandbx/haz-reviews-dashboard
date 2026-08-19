@@ -222,6 +222,12 @@ export interface HzOutletContext {
   addToast: (message: string, type?: ToastItem['type']) => void
   requireAuth: <T>(fn: () => T | Promise<T>) => Promise<T>
   currentUserId: string | null
+  /**
+   * Resolves the caller's current access token, for the assistant endpoint's
+   * server-side authorization check. Asked for per call rather than held here, so a
+   * long-open tab never sends a token that expired while it sat idle.
+   */
+  getAccessToken: () => Promise<string | null>
   writeGate: WriteGate
   isAdmin: boolean
   accessLoading: boolean

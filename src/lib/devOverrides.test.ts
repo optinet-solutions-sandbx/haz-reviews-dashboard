@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { resolveDevOverride, resolveRequireAuth } from './devOverrides'
+import { resolveDevOverride, resolveGoogleAuth, resolveRequireAuth } from './devOverrides'
 
 describe('resolveDevOverride', () => {
   // THE test that matters. The flag is a convenience for a machine with no
@@ -104,5 +104,37 @@ describe('resolveRequireAuth', () => {
    */
   it('cannot be on in a demo build', () => {
     expect(resolveRequireAuth({ VITE_REQUIRE_AUTH: 'true', VITE_DEMO_MODE: 'true' })).toBe(false)
+  })
+})
+
+describe('resolveGoogleAuth', () => {
+  /**
+   * Opt-IN, unlike every other flag here, because the failure mode is the
+   * reverse. "Continue with Google" throws `Unsupported provider` until a Google
+   * OAuth client is configured in the Supabase project, and a portal that
+   * strangers use should not offer a button that errors — a missing button reads
+   * as "this app uses passwords", a broken one reads as "this app is broken".
+   */
+  it('is off unless explicitly enabled', () => {
+    expect(resolveGoogleAuth({})).toBe(false)
+    expect(resolveGoogleAuth({ VITE_ENABLE_GOOGLE_AUTH: '' })).toBe(false)
+    expect(resolveGoogleAuth({ VITE_ENABLE_GOOGLE_AUTH: 'false' })).toBe(false)
+  })
+
+  it('requires exactly true, not merely something truthy', () => {
+    // A commented-out line usually reads as an empty string, and 'yes' or '1'
+    // would otherwise silently enable a provider nobody set up.
+    expect(resolveGoogleAuth({ VITE_ENABLE_GOOGLE_AUTH: 'yes' })).toBe(false)
+    expect(resolveGoogleAuth({ VITE_ENABLE_GOOGLE_AUTH: '1' })).toBe(false)
+    expect(resolveGoogleAuth({ VITE_ENABLE_GOOGLE_AUTH: 'TRUE' })).toBe(false)
+    expect(resolveGoogleAuth({ VITE_ENABLE_GOOGLE_AUTH: 'true' })).toBe(true)
+  })
+
+  it('stays off in a demo build even when enabled', () => {
+    // A demo has no Supabase project behind it, so the provider cannot be
+    // configured there by definition.
+    expect(resolveGoogleAuth({ VITE_ENABLE_GOOGLE_AUTH: 'true', VITE_DEMO_MODE: 'true' })).toBe(
+      false,
+    )
   })
 })

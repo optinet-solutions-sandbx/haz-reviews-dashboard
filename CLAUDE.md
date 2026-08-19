@@ -7,8 +7,13 @@ Guidance for Claude Code when working in this repository.
 ```bash
 npm run dev       # Vite dev server on localhost:3002 (strictPort)
 npm run build     # tsc -b && vite build — the primary regression net
-npm test          # vitest run — 245 tests, node environment
+npm test          # vitest run — 320 tests, node environment
 npm run test:watch
+
+# Checks a LIVE Supabase project, reading .env.local. Add ADMIN_PASSWORD=... to
+# include the account checks. Verifies behaviour rather than configuration —
+# see below on why the write probe is the check that matters.
+npm run verify:supabase
 ```
 
 `api/ask-ai.ts` is the only serverless function and it exists for DEPLOYED builds
@@ -204,6 +209,144 @@ Violating any of these produces silent wrongness rather than an error.
     `maxDuration` and answers 504, at 60 seconds of billed compute apiece. Again
     invisible to the type-check, the build and the suite. Asserted by
     `server/vercelHandlers.test.ts`.
+33. **Never let an aborted probe resolve to an assistant status.**
+    `probeAssistant` rethrows an `AbortError`, and the effect in `AskAi.tsx`
+    re-checks `signal.aborted` before it calls `setStatus`. StrictMode mounts the
+    page twice, so the cleanup ALWAYS cancels the first probe while it is still in
+    flight; a bare `catch` that turns that cancellation into `{state:'offline'}`
+    puts the dead probe in a race with the live one, and whichever settles last
+    decides the UI. The failure is the worst kind of intermittent: a perfectly
+    valid `OPENAI_API_KEY` renders "Assistant offline" with the composer disabled
+    on roughly every other load, which reads as a missing key rather than as a
+    race, and sends you off to re-check a key that was never the problem. Invisible to
+    `tsc -b`, the build and the suite, all of which passed while it was broken;
+    this file claimed the feature worked end to end in dev the whole time, and it
+    did, on the loads where the live probe happened to land second. Caught in a
+    browser: two GETs to `/api/ask-ai`, one `ERR_ABORTED` and one 200, with the
+    aborted one deciding the page. An abort means "this answer is no longer
+    wanted", never "the endpoint is down". Both layers are load-bearing — with the
+    rethrow but no `catch` on the promise, every mount logs an unhandled
+    rejection. Asserted by the abort test in `src/lib/assistant.test.ts`.
+34. **Never let the assistant endpoint's authorization default to open.**
+    `ASK_AI_REQUIRE_AUTH` is read in `server/askAiAuth.ts`, and only an exact
+    `'false'` opts out — absence means REQUIRED. A required check with no Supabase
+    settings behind it refuses too, rather than falling through to allowed.
+    Both directions matter, because the app's own gate cannot cover this endpoint:
+    `requireAuth` is client-side (invariant 10 — RLS is the boundary) and RLS does
+    not extend to an OpenAI endpoint, so with no server-side check anyone who knows
+    the URL can POST an arbitrary `system` prompt plus arbitrary `messages` and bill
+    it to `OPENAI_API_KEY`. An anonymous OpenAI proxy, not a dashboard feature.
+    Inverting the default is the same shape of mistake as a firewall that fails
+    open: one forgotten variable on one deploy and the door is unlocked, with
+    nothing in the UI to show it — whereas a wrongly-locked endpoint says
+    "Sign in to use the assistant" on the first question.
+
+    Verification is ONE PostgREST read of the caller's own `user_access` row, which
+    is why there is no separate JWT step: PostgREST validates the signature and
+    expiry itself, RLS resolves `auth.uid()` so the row cannot be someone else's,
+    and the row carries `status` — so a signed-in but still-`pending` account is
+    refused in the same round trip. Send the bearer token AND the `apikey`; the anon
+    key alone resolves `auth.uid()` to null, returns zero rows, and reads as
+    "nobody is approved".
+
+    Both hosts call `askAiGate` — one function, not two hand-written sequences — so
+    the order of authorize-then-limit cannot differ between dev and production.
+    Exactly why `server/askAi.ts` already exists on the provider side.
+
+    The rate limit is in memory, per instance. That makes it a speed bump against
+    one signed-in account burning the budget, NOT a spend ceiling: a deployed
+    function scales to many instances and resets on every cold start, so the real
+    allowance is the limit times however many are warm. The only hard ceiling is a
+    capped key at the provider. Say that where the limiter is defined rather than
+    letting a reader infer a guarantee it cannot give.
+
+    `GET` stays open deliberately. It reports only whether a key is configured, and
+    gating it would leave a signed-out page unable to explain why the composer is
+    disabled.
+35. **Never put `/login` or `/reset-password` inside `AuthGate`.** They are
+    declared as siblings of the gated layout route in `App.tsx`, and the gate is
+    now part of that route's `element` rather than a wrapper around `<Routes>` —
+    which is what made a sign-in page impossible to add before. Each fails a
+    different way if moved back inside. `/login` becomes unreachable: the gate
+    renders its own decision instead of the matched route, so the redirect to
+    `/login` resolves to a route that never renders. `/reset-password` fails more
+    quietly and is the one to watch — the emailed recovery link establishes a
+    REAL session, so the gate waves the user through to the dashboard and the
+    screen the email promised never appears. That was the shipped behaviour until
+    2026-08-19: `sendPasswordReset` pointed at a route that did not exist, the
+    catch-all bounced the user to Home, and nothing anywhere said so.
+36. **Never navigate to a `next` parameter without `safeNextPath`.** It arrives
+    from the address bar. Checking `startsWith('/')` is NOT enough — `//evil.com`
+    and `/\evil.com` both pass it and both navigate off-site, the second because
+    browsers normalise a backslash in the authority position. A control character
+    is a third route in, because the browser strips a tab from `java\tscript:`
+    *after* a naive check has already looked at the string and seen nothing
+    alarming. The payoff for an attacker is the highest-value moment in the app:
+    a user who has just typed a password, handed to a page that can ask for it
+    again. `safeNextPath` also refuses to return a sign-in path, or signing in
+    would land the user back on the portal and read as a failed attempt. Every
+    case is in `authRedirect.test.ts`.
+37. **Never let `recoveryFromUrl`'s result be recomputed after mount.** It is read
+    once, in a `useState` initialiser. supabase-js consumes the recovery fragment
+    and strips it from the URL as the client initialises, so anything reading
+    `window.location` later sees a bare path and concludes there was never a
+    token — turning a valid link into "nothing to reset".
+    Its `message` is a REASON FRAGMENT with no terminal punctuation, because the
+    screen joins it onto its own guidance sentence and Supabase's
+    `error_description` arrives in that shape. A fallback written as a finished
+    sentence concatenates into prose that reads as two authors; asserted in the
+    tests rather than left to whoever edits the copy next.
+38. **Never derive a sign-out affordance from the displayed email.** Use
+    `getIdentityGate`: the ADDRESS may be forced by `VITE_DEV_FORCE_EMAIL`, and
+    rendering it with no backend is the entire point of that flag, but a SESSION
+    cannot be forced. The sidebar footer originally chose between "signed in, here
+    is Sign out" and "Sign in" by asking whether it had an address to show, so a
+    forced identity selected the signed-in branch with nothing behind it. The
+    resulting click was the quietest possible failure: `supabase.auth.signOut()`
+    short-circuits when there is no session, so there was **no request, no error,
+    no console warning and no state change** — and the identity it appeared to
+    control was a module-load constant that no runtime call could ever clear.
+    Reported as "the sign-out button is broken"; it was doing the only thing
+    available to it. `tsc -b`, the build and all 314 tests passed throughout.
+    The same trap is waiting for `isAdmin`, which `DEV_OVERRIDE` also forces:
+    anything gated on a forced value must not offer an action that only a real
+    session can perform. Note what is deliberately NOT done here — the fix does
+    not make `signOut` clear the override. `DEV_OVERRIDE` is resolved once at
+    module load precisely so a production build cannot be talked into it at
+    runtime; making it mutable to fix a button would trade invariant-grade safety
+    for cosmetics.
+39. **Never render "Continue with Google" unless `VITE_ENABLE_GOOGLE_AUTH=true`.**
+    `resolveGoogleAuth` is the one env flag here that is opt-IN, because its
+    failure direction is reversed: `signInWithOAuth` throws `Unsupported provider`
+    until a Google OAuth client is configured in the Supabase project. A portal
+    with no Google button reads as "this app uses passwords"; one with a button
+    that errors reads as "this app is broken" — on the first screen a new user
+    ever sees. A demo build forces it off for the same reason it forces the gate
+    off: there is no Supabase project there to configure.
+40. **Never put an account password in an env variable.** Asked for on
+    2026-08-19 as `ADMIN_EMAIL` / `ADMIN_PASSWORD` in `.env`, on the reasonable-
+    sounding theory that it would let visitors sign in with the shared admin
+    account. It cannot work, in two stacked ways, and both are worth knowing
+    because the request will recur.
+
+    First, it does nothing: no code here reads those names, and an env variable
+    has never created a Supabase user. Only Supabase Auth does. Adding the lines
+    yields a password sitting in a file next to an account that still does not
+    exist.
+
+    Second, and worse, the obvious repair is the actual disaster. For credentials
+    to reach a sign-in form they must reach the browser, which means a `VITE_`
+    prefix, which means Vite **inlines them into the client bundle** — the admin
+    password lands in plain text in a JS asset that anyone can read in devtools,
+    permanently, in a git-deployed build. Invariant 27 with a password instead of
+    an API key, and the worse of the two, because rotating a leaked provider key
+    costs a minute while a leaked admin password has already been indexed.
+
+    A password's only home is the auth provider. If a shared credential is meant
+    to be public, print it in the login page's own copy — that is an intentional
+    disclosure of a value the reader is supposed to have, not a secret smuggled
+    into a bundle. `OPENAI_API_KEY` is the shape to copy: server-side, no `VITE_`,
+    never referenced from `src/`.
 
 ## Conventions
 
@@ -225,29 +368,105 @@ Violating any of these produces silent wrongness rather than an error.
 Vitest, node environment, `src/**/*.test.ts`. Coverage is concentrated on pure logic
 where silent data corruption would originate: `groups` (keyword matching),
 `parser` (including real xlsx and csv round-trips), `normalize`, `carryForward`,
-`dates`, `storage` (pagination maths), `useAuth` (write-gate derivation), `theme`,
+`dates`, `storage` (pagination maths), `useAuth` (write-gate AND identity-gate derivation), `theme`,
 `askAiContext` (what the assistant is shown, and what is actually sent), `pageTitle`
 (the tab format, and that the base names the app rather than the registered
 property — which now shares its name, so the distinction is only visible in the
 test) and
 `assistant` (the NDJSON wire format — a dropped line loses part of an answer
 without erroring).
+`authRedirect` (the `next` parameter's open-redirect defences, each disguise
+asserted separately, plus the three recovery-link states) and
+`askAiAuth` (every default asserted in the CLOSED direction, because the failure
+mode of this one is a silent open door that spends money rather than an error).
 
 `npm run build` is the primary regression net — `tsc -b` covers both projects.
 
 ## Known state
 
-The app has **not** been exercised against a live Supabase project — none was
-provisioned during the build. Everything is type-checked, unit-tested, and verified
-rendering in a browser (shell, dark mode, `requireAuth` gate, load-error path), but
-the read/write round trip and RLS policies are unverified end to end. Do that first.
+**The round trip is VERIFIED as of 2026-08-19.** This section said the opposite from
+the build until that date — the app had never touched a live Supabase project. It has
+now, against `lplcodzxneqbubzsgfnv`, driven in a browser with `VITE_REQUIRE_AUTH=true`
+and no dev-force flags:
 
-`.env.local` still holds **placeholder** Supabase values, so no account can be
-created and nothing loads or saves. To fix: real URL + anon key, then run
-`supabase/setup.sql` → `auth-lockdown.sql` → `add-site-column.sql`, sign up through
-the app, and seed the first admin by hand — `handle_new_user` provisions every new
-row as `pending`/`is_admin=false`, and the `admin update user_access` policy needs
-an existing admin, so the first one is unreachable through the UI.
+- Signed out, `/hazreviews/rankings` redirects to `/login?next=%2Fhazreviews%2Frankings`;
+  signing in returns to that exact page.
+- The footer shows the real `admin@dashboard.com`, and the admin nav group appears
+  from the database's own `is_admin`, not a forced flag.
+- An 8-row xlsx imported, persisted, and survived a full reload — so `upsertSnapshot`,
+  `loadRecentSnapshots` and the RLS policies all work. `live blackjack uae` grouped as
+  Live Casino rather than Jack.com, which is the word-boundary rule holding on real data.
+- `logActivity` wrote its audit row.
+- **Sign out ends the session**, and the gate bounces the user back to the portal.
+
+Two findings from doing it, both invisible until real data existed:
+
+1. `activity_log` is **append-only by RLS** — `auth-lockdown.sql` grants read and
+   insert and nothing else, so no one can delete or edit an audit entry, through the
+   API or otherwise. A DELETE answers `204` having removed nothing, because RLS
+   filtered the row rather than refusing the statement. That is correct and worth
+   knowing before someone reads that 204 as a successful deletion.
+2. A counted PostgREST request (`limit=0` + `Prefer: count=exact`) is a RANGE
+   request, so it answers **206** as soon as the table holds anything and 200 only
+   while empty. `verify-supabase.mjs` originally checked for 200 and therefore passed
+   on an empty database and failed on a populated one — exactly backwards. It checks
+   `res.ok` now.
+
+The test snapshot was deleted afterwards, so the tables are empty again apart from the
+one permanent audit row and the single `user_access` row.
+
+Still unexercised: multi-snapshot carry-forward against the database (only one snapshot
+has ever existed there), `loadOlderSnapshots`, the 1,000-row pagination in
+`loadSnapshotRecords` (invariant 1 — needs more than 1,000 records to mean anything),
+and every admin action in `AdminUsers` beyond reading one's own row.
+
+**As of 2026-08-19 `.env.local` holds REAL credentials** for project
+`lplcodzxneqbubzsgfnv`, and the client provably reaches it: a sign-in attempt
+returns Supabase's own `Invalid login credentials` rather than `Failed to fetch`.
+The three dev-force flags and `ASK_AI_REQUIRE_AUTH` are gone with them.
+
+What is NOT done: **the database is still empty** — PostgREST answers `PGRST205`
+(`Could not find the table 'public.user_access'`) for every table, so no SQL has
+run. Remaining, in order, and none of it doable from here because DDL needs the
+service-role key or the SQL editor:
+
+1. Run `supabase/setup.sql` → `auth-lockdown.sql` in the SQL editor.
+   `add-site-column.sql` is a **no-op on a fresh install** — its own header says so
+   and `setup.sql` already creates the `site` column. Harmless to run; note that
+   the pre-2026-08-19 instruction to always run all three overstated it.
+2. Create the auth user with **Auto Confirm ticked** (Authentication → Users → Add
+   user). Not via sign-up: the account is `admin@dashboard.com` and nobody owns
+   `dashboard.com`, so no confirmation mail can be delivered.
+3. Seed it approved+admin by hand. `handle_new_user` provisions every new row as
+   `pending`/`is_admin=false`, and the `admin update user_access` policy needs an
+   existing admin, so the first one is unreachable through the UI.
+4. Only then set `VITE_REQUIRE_AUTH=true`. Doing it earlier locks the dashboard
+   behind a sign-in nothing can satisfy.
+
+**Verify with `npm run verify:supabase`, and read the WRITE row, not the read row.**
+The script probes behaviour with the same anon key the browser ships, because a
+policy can be present and still permissive — configuration and behaviour come
+apart. One subtlety is load-bearing: `setup.sql`'s interim policies are
+`for all using (true) with check (true)` with **no `TO` clause**, which defaults to
+`PUBLIC` and so includes `anon`. On an EMPTY database a signed-out *read* returns
+`[]` whether or not `auth-lockdown.sql` ran, so the read check cannot tell the two
+apart and deliberately reports "no rows yet" rather than PASS. The *write* probe
+can, and does: it posts a `ranking_records` row whose `snapshot_id` violates the
+foreign key, and Postgres evaluates RLS before the FK trigger fires — `42501` means
+RLS refused, `23503` means RLS **allowed** it and only the constraint intervened.
+Nothing is ever written; the FK violation aborts the statement. Do not "simplify"
+that probe into a plain insert, and do not upgrade the read check to PASS on zero
+rows.
+
+A note on that account, because it is unusual and a future session will otherwise
+try to "fix" it: it is ONE SHARED credential, intended by the requestor to be handed
+to anyone who has the app's link. It is not an oversight. The cost was stated
+plainly — every holder can approve/revoke users, delete every snapshot, and spend
+`OPENAI_API_KEY` through Ask AI — and the requestor confirmed it three times. The
+narrower option (approved but not admin, plus a separate real admin) remains
+available and is a one-line change to the seed. Credentials are NOT stored in this
+repo or in any env file, and must not be: see the note below on why an
+`ADMIN_PASSWORD` variable cannot work.
 
 Until then `VITE_DEV_FORCE_ADMIN=true` forces `isAdmin` and an account email so the
 admin nav group and the footer identity render with no backend. It is a
@@ -305,6 +524,15 @@ two-turn thread, the offline state, and a provider failure.
   which is the probe working as designed. `src/lib/assistant.ts` stays
   provider-blind, so swapping in a Supabase Edge Function later needs no client
   change.
+- **The endpoint authorizes its own callers** — `server/askAiAuth.ts`, shared by
+  both hosts through one `askAiGate` call. A Supabase session is verified by a
+  single PostgREST read of the caller's own `user_access` row, which also refuses a
+  `pending` or `revoked` account, plus a per-user rate limit. `ASK_AI_REQUIRE_AUTH`
+  opts out on an exact `'false'` and nothing else; absence means required. See
+  invariant 34, including why the in-memory limiter is a speed bump rather than a
+  spend ceiling. `.env.local` sets the opt-out today only because the Supabase
+  values there are placeholders, so no session can be obtained — delete that line
+  once they are real, and the gate gets exercised locally before it matters live.
 - **Three outcomes arrive with HTTP 200** and are each surfaced rather than read as
   success: a refusal, a `content_filter` finish, and `length` (truncation). On a
   reasoning model, hidden reasoning tokens count against `max_completion_tokens`,
@@ -364,6 +592,7 @@ project behind it. Its environment variables:
 | `VITE_DEMO_MODE` | `true` | fixture data, forced admin, gate off |
 | `OPENAI_API_KEY` | real key, **never `VITE_`-prefixed** | invariant 27 — a `VITE_` variable is inlined into the bundle |
 | `OPENAI_MODEL` | optional, e.g. `gpt-4o-mini` | defaults to `gpt-4o` |
+| `ASK_AI_REQUIRE_AUTH` | `false` on a demo; ABSENT on a real deployment | a demo has no session to verify, so its assistant only works with the endpoint's own gate opted out — and since absence means required, a real deployment sets nothing at all (invariant 34) |
 
 `VITE_REQUIRE_AUTH` is deliberately absent: `resolveRequireAuth` ignores it in a
 demo build.
@@ -377,6 +606,11 @@ preview: Settings → Environment Variables → tick Preview. Production is unaf
 The GitHub repo is connected, so every push to `master` redeploys to production.
 `vercel --prod` from a working copy does the same thing without a push.
 
-**The demo's assistant endpoint is unauthenticated.** The gate is off, so
-`POST /api/ask-ai` is world-callable and spends whatever key is configured. Give
-it a capped or throwaway key — nothing in the app limits who may ask.
+**The assistant endpoint authorizes its own callers** as of 2026-08-19, so it is no
+longer world-callable — see invariant 34. Two things still follow from that rather
+than being solved by it. A demo build has no session to present, so a demo that
+wants a working assistant has to set `ASK_AI_REQUIRE_AUTH=false` and is then
+spending on anonymous callers again: give that deployment a capped or throwaway
+key, or leave it with no key at all and let the page report itself offline. And the
+rate limit is per-instance and in memory, so the only hard spend ceiling is a cap
+set on the key at the provider.
