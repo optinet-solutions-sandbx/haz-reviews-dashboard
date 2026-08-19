@@ -1,4 +1,4 @@
-import { ArrowLeft, Search } from 'lucide-react'
+import { ArrowLeft, Search, Upload } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { Link, Navigate, useOutletContext, useParams } from 'react-router-dom'
 import type { HzOutletContext, KeywordGroup, RankingRecord, Snapshot } from '../types'
@@ -58,7 +58,35 @@ function GroupGrid({ ctx }: { ctx: HzOutletContext }) {
   }, [snapshot])
 
   const header = (
-    <PageHeader title="Rankings">
+    <PageHeader
+      title="Rankings"
+      // Only once a snapshot exists. Before that the EmptyState owns the call to
+      // action, and two Import buttons on one screen is worse than one.
+      //
+      // This is the ONLY import entry point for a site that already holds data —
+      // EmptyState's button disappears with the empty state, so without this the
+      // app could ingest a first week and then never a second, which is fatal to a
+      // tracker whose whole purpose is comparing weeks.
+      action={
+        snapshot && (
+          <button
+            type="button"
+            onClick={ctx.onOpenUpload}
+            disabled={ctx.writeGate.disabled}
+            // Its own aria-label: writeGate.title is undefined whenever writes are
+            // allowed, so the title attribute cannot be relied on for the
+            // accessible name (invariant 22).
+            aria-label="Import ranking data"
+            title={ctx.writeGate.title ?? 'Import ranking data'}
+            className="flex shrink-0 cursor-pointer items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[12px] font-semibold text-white transition-colors disabled:cursor-not-allowed disabled:opacity-60"
+            style={{ background: 'var(--btn-ink)' }}
+          >
+            <Upload size={13} />
+            Import
+          </button>
+        )
+      }
+    >
       {ctx.activeSite.domain}
       {snapshot ? ` · ${snapshot.displayDate}` : ''}
     </PageHeader>
