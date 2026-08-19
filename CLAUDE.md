@@ -7,7 +7,7 @@ Guidance for Claude Code when working in this repository.
 ```bash
 npm run dev       # Vite dev server on localhost:3002 (strictPort)
 npm run build     # tsc -b && vite build — the primary regression net
-npm test          # vitest run — 245 tests, node environment
+npm test          # vitest run — 253 tests, node environment
 npm run test:watch
 ```
 
@@ -204,6 +204,24 @@ Violating any of these produces silent wrongness rather than an error.
     `maxDuration` and answers 504, at 60 seconds of billed compute apiece. Again
     invisible to the type-check, the build and the suite. Asserted by
     `server/vercelHandlers.test.ts`.
+33. **Never let an aborted probe resolve to an assistant status.**
+    `probeAssistant` rethrows an `AbortError`, and the effect in `AskAi.tsx`
+    re-checks `signal.aborted` before it calls `setStatus`. StrictMode mounts the
+    page twice, so the cleanup ALWAYS cancels the first probe while it is still in
+    flight; a bare `catch` that turns that cancellation into `{state:'offline'}`
+    puts the dead probe in a race with the live one, and whichever settles last
+    decides the UI. The failure is the worst kind of intermittent: a perfectly
+    valid `OPENAI_API_KEY` renders "Assistant offline" with the composer disabled
+    on roughly every other load, which reads as a missing key rather than as a
+    race, and sends you off to re-check a key that was never the problem. Invisible to
+    `tsc -b`, the build and the suite, all of which passed while it was broken;
+    this file claimed the feature worked end to end in dev the whole time, and it
+    did, on the loads where the live probe happened to land second. Caught in a
+    browser: two GETs to `/api/ask-ai`, one `ERR_ABORTED` and one 200, with the
+    aborted one deciding the page. An abort means "this answer is no longer
+    wanted", never "the endpoint is down". Both layers are load-bearing — with the
+    rethrow but no `catch` on the promise, every mount logs an unhandled
+    rejection. Asserted by the abort test in `src/lib/assistant.test.ts`.
 
 ## Conventions
 

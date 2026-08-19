@@ -84,7 +84,18 @@ export function AskAi() {
 
   useEffect(() => {
     const abort = new AbortController()
-    void probeAssistant(abort.signal).then(setStatus)
+    // Guard the WRITE as well as the throw. The cleanup below aborts this probe on
+    // StrictMode's first unmount, and a result that arrives after cancellation
+    // must not reach state whatever produced it. `catch` is not incidental: with
+    // the abort now rethrown, without it every mount logs an unhandled rejection.
+    probeAssistant(abort.signal)
+      .then((next) => {
+        if (!abort.signal.aborted) setStatus(next)
+      })
+      .catch(() => {
+        // Only ever a cancellation — every real failure is already an `offline`
+        // status, so there is nothing here to surface.
+      })
     return () => abort.abort()
   }, [])
 

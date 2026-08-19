@@ -99,6 +99,36 @@ describe('probeAssistant', () => {
     vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('ECONNREFUSED') }))
     expect((await probeAssistant()).state).toBe('offline')
   })
+
+  /**
+   * StrictMode mounts the page twice, so the first probe is ALWAYS aborted by the
+   * effect's cleanup while still in flight. An abort is not a verdict on the
+   * endpoint — it means "this answer is no longer wanted" — so it must never
+   * become a status. Translating it into `offline` makes the cancelled probe race
+   * the live one, and whichever settles last wins.
+   *
+   * This shipped: with a valid key the page rendered "Assistant offline" with the
+   * composer disabled on roughly every other load, which reads as a missing key
+   * rather than as a race. Verified in a browser — two requests to /api/ask-ai,
+   * one ERR_ABORTED and one 200, with the aborted one deciding the UI.
+   */
+  it('rejects rather than reporting offline when the probe is aborted', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        (_url: string, init: RequestInit) =>
+          new Promise((_resolve, reject) => {
+            init.signal?.addEventListener('abort', () => {
+              reject(new DOMException('The operation was aborted.', 'AbortError'))
+            })
+          }),
+      ),
+    )
+    const controller = new AbortController()
+    const pending = probeAssistant(controller.signal)
+    controller.abort()
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' })
+  })
 })
 
 describe('streamAssistant', () => {
