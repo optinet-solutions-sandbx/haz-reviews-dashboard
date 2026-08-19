@@ -415,10 +415,26 @@ Two findings from doing it, both invisible until real data existed:
 The test snapshot was deleted afterwards, so the tables are empty again apart from the
 one permanent audit row and the single `user_access` row.
 
-Still unexercised: multi-snapshot carry-forward against the database (only one snapshot
-has ever existed there), `loadOlderSnapshots`, the 1,000-row pagination in
-`loadSnapshotRecords` (invariant 1 — needs more than 1,000 records to mean anything),
-and every admin action in `AdminUsers` beyond reading one's own row.
+**Carry-forward is verified too**, with two real snapshots in the database. Week 2
+omitted volume and URL for two keywords: the view showed the inherited `2.4K` while
+the STORED row still read `search_volume: ""`, which is invariant 2 holding — the
+inheritance is derived at render time and never persisted. Deltas computed across
+snapshots (`1▲ (2)`). Note that only `searchVolume` carries forward, by design: a
+ranking URL can legitimately vanish week to week, so inheriting one would assert a
+page ranked when the export said nothing. The `—` in that column is correct, not a gap.
+
+That test also surfaced a real defect, now fixed: **the only import control lived in
+`EmptyState`**, so a site could ingest a first week and then never a second — fatal
+to a tracker whose whole purpose is comparing weeks, and invisible until a second
+import was attempted. `PageHeader` grew an `action` slot and the Rankings header
+carries an Import button. (Invariant 22 already described "the Import button" and its
+`aria-label`; that button did not exist anywhere in `src/` at the time, so the
+invariant was documenting a control that had been lost.)
+
+Still unexercised: `loadOlderSnapshots` (nothing beyond the newest 8 has existed),
+the 1,000-row pagination in `loadSnapshotRecords` (invariant 1 — needs more than
+1,000 records to mean anything), and every admin action in `AdminUsers` beyond
+reading one's own row.
 
 **As of 2026-08-19 `.env.local` holds REAL credentials** for project
 `lplcodzxneqbubzsgfnv`, and the client provably reaches it: a sign-in attempt
