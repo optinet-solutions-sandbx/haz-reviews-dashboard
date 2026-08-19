@@ -63,6 +63,18 @@
      existed in light would make the control behave differently in dark. */
   --ref-primary-800: #18225a;
 
+  /* Added for the ported /login screen. Same rule as the tokens above: these are
+     the SHELL's values, not this app's, so the screen matches the spec exactly
+     rather than approximately. Each is re-pointed at one of our own tokens in the
+     dark block, because the shell has no dark theme to match. */
+  --ref-neutral-700: #374056;
+  --ref-accent-400: #4cb8ec;
+  --ref-danger-600: #c7362f;
+  /* The shell's page ground. NOT --page, which is #F5F7FA — one step cooler in
+     blue. Imperceptible alone, but the spec pins this value and the two grounds
+     would sit side by side if a second screen is ever ported. */
+  --login-page: #f5f7fb;
+
   --ink: #101A2E;
   --ink-2: #1E293B;
   --text-2: #475467;
@@ -185,6 +197,12 @@
   --ref-neutral-600: var(--text-2);
   --ref-neutral-800: var(--ink);
   --ref-neutral-50: var(--hover);
+  --ref-neutral-700: var(--text-2);
+  --ref-accent-400: var(--brand-light);
+  --ref-danger-600: var(--neg);
+  /* --hover is a SURFACE tone in dark (#1B2532), so --ref-neutral-50 cannot stand
+     in for a page ground here the way it does for the composer's hover wash. */
+  --login-page: var(--page);
 
   --ink: #E8EDF6;
   --ink-2: #D3DCEA;
@@ -446,4 +464,145 @@ body {
 
 .brand-gradient {
   background: linear-gradient(90deg, #1e2a6e 0%, #1c9fe0 100%);
+}
+
+/* ─── /login ─────────────────────────────────────────────────────────────────
+
+   A port of the shell's login screen, specified in docs/login-spec.md. Real CSS
+   classes rather than Tailwind utilities, for the same reason the .ask-ai-* block
+   above is: the spec pins exact pixel and colour values, and a utility soup makes
+   a later "tidy-up" silently round 14px to 12px. Every colour resolves through a
+   token so dark mode still works — the spec itself has no dark theme, so those
+   pairings are ours alone.
+
+   Type is Figtree only. Outfit and JetBrains Mono are loaded app-wide but must not
+   appear here; --font-body IS Figtree, and body already sets it. */
+
+.login-page {
+  min-height: 100vh;
+  background: var(--login-page);
+}
+
+.login-card {
+  /* Top-weighted, NOT vertically centred. Deliberate in the spec, and the reason
+     the screen looks high on a tall monitor — do not "fix" it to a flex centre. */
+  margin: 64px auto 0;
+  max-width: 384px;
+  padding: 24px;
+  background: var(--surface);
+  border: 1px solid var(--ref-neutral-200);
+  border-radius: 14px;
+  box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
+}
+
+.login-card h1 {
+  margin: 0 0 4px;
+  font-size: 20px;
+  line-height: 28px;
+  font-weight: 700;
+  color: var(--ref-neutral-800);
+}
+
+.login-sub {
+  margin: 0 0 16px;
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--ref-neutral-500);
+}
+
+/* The spec's `space-y-3`. An adjacent-sibling margin rather than a flex gap so a
+   conditionally-rendered error row cannot leave a doubled gap behind it. */
+.login-form > * + * {
+  margin-top: 12px;
+}
+
+.login-form label {
+  display: block;
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 500;
+  color: var(--ref-neutral-700);
+}
+
+.login-form input {
+  margin-top: 4px;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 12px;
+  border: 1px solid var(--ref-neutral-300);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ref-neutral-800);
+  font: inherit;
+  font-size: 14px;
+  line-height: 20px;
+  /* Suppresses the global :focus-visible outline so the ring below is the only
+     one. 8 + 20 + 8 + 2px border = 38px. */
+  outline: none;
+}
+
+.login-form input:focus-visible {
+  border-color: var(--brand-blue);
+  box-shadow: 0 0 0 2px var(--brand-blue);
+}
+
+.login-error {
+  /* ONLY the bottom margin. The spec's §8 sets `margin: 0` here, which has the same
+     specificity as the `> * + *` rule above and, being later, silently wins — so the
+     error row loses its 12px gap and the card measures 320px instead of the 332px
+     §5 documents. The original app does not have that bug: Tailwind's real
+     `space-y-3` compiles to `> :not([hidden]) ~ :not([hidden])`, which outranks a
+     single class. This keeps §5's rhythm, which is the authority on spacing. */
+  margin-bottom: 0;
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--ref-danger-600);
+}
+
+.login-submit {
+  width: 100%;
+  padding: 8px 12px;
+  /* TRANSPARENT 1px border, not `none` — spec §11.1. The inputs carry a border and
+     the button does not, so the source renders 36px against their 38px and the
+     edges do not line up. This makes them flush without touching the padding. */
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: var(--brand-navy);
+  color: #fff;
+  font: inherit;
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 500;
+  cursor: pointer;
+  /* Spec §11.3 — the source jumps between navy shades with no transition. */
+  transition: background-color 0.15s ease;
+  /* Spec §11.2 — the source takes its own ring AND the global outline, drawing two.
+     Its own ring wins because it reads on the navy fill; the global azure outline
+     does not. */
+  outline: none;
+}
+
+.login-submit:hover:not(:disabled) {
+  background: var(--ref-primary-800);
+}
+
+.login-submit:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.login-submit:focus-visible {
+  /* The white inner stop separates ring from fill. --surface, not #fff, or the ring
+     draws a white halo on a near-black card in dark mode. */
+  box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--ref-accent-400);
+}
+
+/* Chrome paints autofilled inputs rgb(232,240,254) and ignores `background`. The
+   inset shadow is the only way to override it — and it must be re-declared on
+   focus/hover, which Chrome treats as separate states. */
+.login-form input:-webkit-autofill,
+.login-form input:-webkit-autofill:hover,
+.login-form input:-webkit-autofill:focus {
+  -webkit-box-shadow: 0 0 0 100px var(--surface) inset;
+  -webkit-text-fill-color: var(--ref-neutral-800);
 }

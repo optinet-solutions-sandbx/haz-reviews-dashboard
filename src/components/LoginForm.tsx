@@ -1,170 +1,97 @@
 import { useState } from 'react'
-import { sendPasswordReset, signIn, signInWithGoogle, signUp } from '../lib/auth'
-import { GOOGLE_AUTH_ENABLED } from '../lib/devOverrides'
-
-type Mode = 'signin' | 'signup' | 'reset'
-
-const COPY: Record<Mode, { title: string; action: string }> = {
-  signin: { title: 'Sign in', action: 'Sign in' },
-  signup: { title: 'Create an account', action: 'Sign up' },
-  reset: { title: 'Reset your password', action: 'Send reset link' },
-}
+import { signIn } from '../lib/auth'
 
 /**
- * The shared credential form, used by the /login portal, the whole-app AuthGate
- * and the inline LoginModal, so the three can never drift apart in behaviour or
- * copy.
+ * The credential form, shared by the /login portal and the inline LoginModal that
+ * `requireAuth` opens, so the two cannot drift apart.
  *
- * `heading` exists for invariant 25 — a page gets exactly one <h1>. On the portal
- * this form's title IS the page title; in the modal the page underneath already
- * owns its <h1>, so the default stays 'h2'.
+ * Sign-in ONLY. Sign-up, password reset and Google were removed on 2026-08-19 when
+ * this screen was ported to the shell's login spec (`docs/login-spec.md`), which has
+ * none of them. That suits a tool used by one small group: accounts are created in
+ * the Supabase dashboard, so there is no self-registration into the pending queue,
+ * and `/reset-password` still works from a link an admin triggers there.
+ *
+ * The heading lives on the PAGE, not here — `/login` renders the app name as its
+ * single <h1> with "Sign in to continue" beneath it (invariant 25). This component
+ * deliberately renders no heading of its own, which is also what lets the modal
+ * reuse it without introducing a second one.
  */
-export function LoginForm({
-  onSignedIn,
-  heading = 'h2',
-}: {
-  onSignedIn?: () => void
-  heading?: 'h1' | 'h2'
-}) {
-  const Heading = heading
-  const [mode, setMode] = useState<Mode>('signin')
+export function LoginForm({ onSignedIn }: { onSignedIn?: () => void }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [notice, setNotice] = useState<string | null>(null)
 
   async function submit(e: React.FormEvent) {
     e.preventDefault()
     setError(null)
-    setNotice(null)
     setBusy(true)
     try {
-      if (mode === 'signin') {
-        await signIn(email, password)
-        onSignedIn?.()
-      } else if (mode === 'signup') {
-        await signUp(email, password)
-        setNotice('Account created. An admin needs to approve it before you can make changes.')
-      } else {
-        await sendPasswordReset(email)
-        setNotice('If that address has an account, a reset link is on its way.')
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      await signIn(email, password)
+      onSignedIn?.()
+    } catch {
+      // ONE generic message, and deliberately not the provider's. Supabase already
+      // answers "Invalid login credentials" for a wrong password, but it is specific
+      // for other failures — an unconfirmed email says so, which tells an attacker
+      // the address exists. Collapsing every credential failure to one string denies
+      // account enumeration. The spec calls this out and it is worth keeping.
+      //
+      // The cost is real and accepted: a genuine outage now reads as a bad password.
+      // The readiness probe and `npm run verify:supabase` are where that gets
+      // diagnosed instead.
+      setError('Invalid email or password.')
     } finally {
       setBusy(false)
     }
   }
 
   return (
-    <form onSubmit={submit} className="flex flex-col gap-3">
-      <Heading className="font-display text-[17px] font-semibold" style={{ color: 'var(--ink)' }}>
-        {COPY[mode].title}
-      </Heading>
-
-      <label className="flex flex-col gap-1">
-        <span
-          className="text-[9px] font-semibold uppercase tracking-[0.1em]"
-          style={{ color: 'var(--muted)' }}
-        >
-          Email
-        </span>
+    <form
+      className="login-form"
+      onSubmit={submit}
+      // Points at the error only while one exists, so a screen reader is not told
+      // the form is described by an empty node.
+      aria-describedby={error ? 'login-form-error' : undefined}
+    >
+      <div>
+        <label htmlFor="login-email">Email</label>
         <input
+          id="login-email"
+          name="email"
           type="email"
           required
           autoComplete="email"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
-          className="rounded-lg px-2.5 py-2 font-mono text-[12px] outline-none"
-          style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--ink)' }}
         />
-      </label>
+      </div>
 
-      {mode !== 'reset' && (
-        <label className="flex flex-col gap-1">
-          <span
-            className="text-[9px] font-semibold uppercase tracking-[0.1em]"
-            style={{ color: 'var(--muted)' }}
-          >
-            Password
-          </span>
-          <input
-            type="password"
-            required
-            minLength={8}
-            autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            className="rounded-lg px-2.5 py-2 font-mono text-[12px] outline-none"
-            style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--ink)' }}
-          />
-        </label>
-      )}
+      <div>
+        <label htmlFor="login-password">Password</label>
+        <input
+          id="login-password"
+          name="password"
+          type="password"
+          required
+          autoComplete="current-password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+        />
+      </div>
 
+      {/* Between the password and the button, per the spec's vertical rhythm, and
+          role="alert" so it announces on appearance rather than only on focus. */}
       {error && (
-        <p className="text-[11px]" style={{ color: 'var(--neg)' }}>
+        <p className="login-error" id="login-form-error" role="alert">
           {error}
         </p>
       )}
-      {notice && (
-        <p className="text-[11px]" style={{ color: 'var(--pos)' }}>
-          {notice}
-        </p>
-      )}
 
-      <button
-        type="submit"
-        disabled={busy}
-        className="rounded-lg py-2 text-[12px] font-semibold text-white disabled:opacity-60"
-        style={{ background: 'var(--btn-ink)' }}
-      >
-        {busy ? 'Working…' : COPY[mode].action}
+      <button className="login-submit" type="submit" disabled={busy}>
+        {/* A single U+2026, not three periods — the spec is explicit, and three dots
+            reflow at a different width as the label changes. */}
+        {busy ? 'Signing in…' : 'Sign in'}
       </button>
-
-      {/* Hidden unless a Google OAuth client is actually configured in the
-          Supabase project. signInWithOAuth throws 'Unsupported provider'
-          otherwise, and an erroring button on the first screen a new user sees
-          reads as a broken app rather than as an unconfigured provider. */}
-      {GOOGLE_AUTH_ENABLED && (
-        <button
-          type="button"
-          onClick={() => void signInWithGoogle()}
-          className="rounded-lg py-2 text-[12px] font-medium"
-          style={{ border: '1px solid var(--border)', color: 'var(--text-2)' }}
-        >
-          Continue with Google
-        </button>
-      )}
-
-      <div className="flex justify-between text-[11px]">
-        <button
-          type="button"
-          className="text-glow"
-          style={{ color: 'var(--muted)' }}
-          onClick={() => setMode(mode === 'signup' ? 'signin' : 'signup')}
-        >
-          {mode === 'signup' ? 'I already have an account' : 'Create an account'}
-        </button>
-        <button
-          type="button"
-          className="text-glow"
-          style={{ color: 'var(--muted)' }}
-          onClick={() => setMode(mode === 'reset' ? 'signin' : 'reset')}
-        >
-          {mode === 'reset' ? 'Back to sign in' : 'Forgot password?'}
-        </button>
-      </div>
-
-      {/* Google OAuth reloads the page, so a pending action captured by
-          requireAuth cannot survive it. Saying so beats a silent no-op — but only
-          where the button it describes is actually rendered. */}
-      {GOOGLE_AUTH_ENABLED && (
-        <p className="text-[10px] leading-snug" style={{ color: 'var(--muted-3)' }}>
-          Signing in with Google reloads the page — you may need to click what you were
-          doing again.
-        </p>
-      )}
     </form>
   )
 }

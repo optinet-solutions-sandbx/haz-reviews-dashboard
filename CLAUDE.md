@@ -7,7 +7,7 @@ Guidance for Claude Code when working in this repository.
 ```bash
 npm run dev       # Vite dev server on localhost:3002 (strictPort)
 npm run build     # tsc -b && vite build — the primary regression net
-npm test          # vitest run — 320 tests, node environment
+npm test          # vitest run — 317 tests, node environment
 npm run test:watch
 
 # Checks a LIVE Supabase project, reading .env.local. Add ADMIN_PASSWORD=... to
@@ -315,14 +315,33 @@ Violating any of these produces silent wrongness rather than an error.
     module load precisely so a production build cannot be talked into it at
     runtime; making it mutable to fix a button would trade invariant-grade safety
     for cosmetics.
-39. **Never render "Continue with Google" unless `VITE_ENABLE_GOOGLE_AUTH=true`.**
-    `resolveGoogleAuth` is the one env flag here that is opt-IN, because its
-    failure direction is reversed: `signInWithOAuth` throws `Unsupported provider`
-    until a Google OAuth client is configured in the Supabase project. A portal
-    with no Google button reads as "this app uses passwords"; one with a button
-    that errors reads as "this app is broken" — on the first screen a new user
-    ever sees. A demo build forces it off for the same reason it forces the gate
-    off: there is no Supabase project there to configure.
+39. **`/login` is a PORT of `docs/login-spec.md`, and the spec's §5 outranks its
+    §8.** Sign-in only — no sign-up, no reset link, no Google, no monogram — because
+    that is what the spec is; accounts are created in the Supabase dashboard.
+    The chrome lives in `.login-*` classes in `index.css`, not Tailwind utilities,
+    for the reason the `.ask-ai-*` block does: the spec pins exact pixel values and a
+    later "tidy-up" of utility soup silently rounds 14px to 12px.
+    Three things a re-port will get wrong:
+    - **Never hardcode the spec's hexes.** They resolve through `--ref-*` tokens,
+      which carry the shell's exact light values and re-point at ours in `.dark`.
+      The spec has no dark theme and its literal `#fff` would make this the only
+      light-only screen in an app that ships a working one. `--login-page` exists
+      because `--ref-neutral-50` maps to `--hover` in dark, a surface tone, which is
+      wrong for a page ground.
+    - **`.login-error` sets `margin-bottom: 0`, not `margin: 0`.** The spec's §8 uses
+      `margin: 0`, which ties on specificity with `.login-form > * + *` and, being
+      later, silently wins — collapsing the 12px gap and giving a 320px card where
+      §5 documents 332px. The original app is unaffected because Tailwind's real
+      `space-y-3` compiles to a higher-specificity selector. §5 is the authority.
+    - **The three §11 fixes are applied deliberately**: the submit carries a
+      transparent 1px border so it measures 38px like the inputs rather than 36px,
+      sets `outline: none` so it draws one focus ring instead of two, and has a
+      0.15s hover transition. Do not "restore" the source's behaviour.
+    Google sign-in is deliberately ABSENT, and `resolveGoogleAuth` was deleted with
+    it rather than left behind describing a control that no longer exists — the
+    mistake invariant 22 made. `signInWithOAuth` throws `Unsupported provider` until
+    a Google client is configured in the Supabase project, so re-adding the button
+    means configuring the provider FIRST, not adding a flag.
 40. **Never put an account password in an env variable.** Asked for on
     2026-08-19 as `ADMIN_EMAIL` / `ADMIN_PASSWORD` in `.env`, on the reasonable-
     sounding theory that it would let visitors sign in with the shared admin
