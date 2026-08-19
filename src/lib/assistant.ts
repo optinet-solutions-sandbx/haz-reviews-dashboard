@@ -81,10 +81,25 @@ export async function streamAssistant(opts: {
   messages: AssistantTurn[]
   onText: (chunk: string) => void
   signal?: AbortSignal
+  /**
+   * The caller's Supabase access token, for the endpoint's own authorization check.
+   *
+   * Passed in rather than read here: this module must not import the Supabase
+   * client, which throws at module load without credentials — the same constraint
+   * that put `resolveRequireAuth` in devOverrides.ts — and importing it would make
+   * this file impossible to unit-test.
+   */
+  token?: string
 }): Promise<{ refused: boolean; truncated: boolean }> {
   const res = await fetch(ASK_AI_ENDPOINT, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      // Omitted rather than sent empty: `Bearer ` with no credential is malformed,
+      // and a proxy may reject it before the endpoint can answer with its own
+      // readable "Sign in to use the assistant."
+      ...(opts.token ? { Authorization: `Bearer ${opts.token}` } : {}),
+    },
     body: JSON.stringify({ system: opts.system, messages: opts.messages }),
     signal: opts.signal,
   })

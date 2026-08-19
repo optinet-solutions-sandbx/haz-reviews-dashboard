@@ -7,7 +7,7 @@ Guidance for Claude Code when working in this repository.
 ```bash
 npm run dev       # Vite dev server on localhost:3002 (strictPort)
 npm run build     # tsc -b && vite build — the primary regression net
-npm test          # vitest run — 253 tests, node environment
+npm test          # vitest run — 286 tests, node environment
 npm run test:watch
 ```
 
@@ -222,6 +222,42 @@ Violating any of these produces silent wrongness rather than an error.
     wanted", never "the endpoint is down". Both layers are load-bearing — with the
     rethrow but no `catch` on the promise, every mount logs an unhandled
     rejection. Asserted by the abort test in `src/lib/assistant.test.ts`.
+34. **Never let the assistant endpoint's authorization default to open.**
+    `ASK_AI_REQUIRE_AUTH` is read in `server/askAiAuth.ts`, and only an exact
+    `'false'` opts out — absence means REQUIRED. A required check with no Supabase
+    settings behind it refuses too, rather than falling through to allowed.
+    Both directions matter, because the app's own gate cannot cover this endpoint:
+    `requireAuth` is client-side (invariant 10 — RLS is the boundary) and RLS does
+    not extend to an OpenAI endpoint, so with no server-side check anyone who knows
+    the URL can POST an arbitrary `system` prompt plus arbitrary `messages` and bill
+    it to `OPENAI_API_KEY`. An anonymous OpenAI proxy, not a dashboard feature.
+    Inverting the default is the same shape of mistake as a firewall that fails
+    open: one forgotten variable on one deploy and the door is unlocked, with
+    nothing in the UI to show it — whereas a wrongly-locked endpoint says
+    "Sign in to use the assistant" on the first question.
+
+    Verification is ONE PostgREST read of the caller's own `user_access` row, which
+    is why there is no separate JWT step: PostgREST validates the signature and
+    expiry itself, RLS resolves `auth.uid()` so the row cannot be someone else's,
+    and the row carries `status` — so a signed-in but still-`pending` account is
+    refused in the same round trip. Send the bearer token AND the `apikey`; the anon
+    key alone resolves `auth.uid()` to null, returns zero rows, and reads as
+    "nobody is approved".
+
+    Both hosts call `askAiGate` — one function, not two hand-written sequences — so
+    the order of authorize-then-limit cannot differ between dev and production.
+    Exactly why `server/askAi.ts` already exists on the provider side.
+
+    The rate limit is in memory, per instance. That makes it a speed bump against
+    one signed-in account burning the budget, NOT a spend ceiling: a deployed
+    function scales to many instances and resets on every cold start, so the real
+    allowance is the limit times however many are warm. The only hard ceiling is a
+    capped key at the provider. Say that where the limiter is defined rather than
+    letting a reader infer a guarantee it cannot give.
+
+    `GET` stays open deliberately. It reports only whether a key is configured, and
+    gating it would leave a signed-out page unable to explain why the composer is
+    disabled.
 
 ## Conventions
 
@@ -250,6 +286,8 @@ property — which now shares its name, so the distinction is only visible in th
 test) and
 `assistant` (the NDJSON wire format — a dropped line loses part of an answer
 without erroring).
+`askAiAuth` (every default asserted in the CLOSED direction, because the failure
+mode of this one is a silent open door that spends money rather than an error).
 
 `npm run build` is the primary regression net — `tsc -b` covers both projects.
 
@@ -323,6 +361,15 @@ two-turn thread, the offline state, and a provider failure.
   which is the probe working as designed. `src/lib/assistant.ts` stays
   provider-blind, so swapping in a Supabase Edge Function later needs no client
   change.
+- **The endpoint authorizes its own callers** — `server/askAiAuth.ts`, shared by
+  both hosts through one `askAiGate` call. A Supabase session is verified by a
+  single PostgREST read of the caller's own `user_access` row, which also refuses a
+  `pending` or `revoked` account, plus a per-user rate limit. `ASK_AI_REQUIRE_AUTH`
+  opts out on an exact `'false'` and nothing else; absence means required. See
+  invariant 34, including why the in-memory limiter is a speed bump rather than a
+  spend ceiling. `.env.local` sets the opt-out today only because the Supabase
+  values there are placeholders, so no session can be obtained — delete that line
+  once they are real, and the gate gets exercised locally before it matters live.
 - **Three outcomes arrive with HTTP 200** and are each surfaced rather than read as
   success: a refusal, a `content_filter` finish, and `length` (truncation). On a
   reasoning model, hidden reasoning tokens count against `max_completion_tokens`,
@@ -382,6 +429,7 @@ project behind it. Its environment variables:
 | `VITE_DEMO_MODE` | `true` | fixture data, forced admin, gate off |
 | `OPENAI_API_KEY` | real key, **never `VITE_`-prefixed** | invariant 27 — a `VITE_` variable is inlined into the bundle |
 | `OPENAI_MODEL` | optional, e.g. `gpt-4o-mini` | defaults to `gpt-4o` |
+| `ASK_AI_REQUIRE_AUTH` | `false` on a demo; ABSENT on a real deployment | a demo has no session to verify, so its assistant only works with the endpoint's own gate opted out — and since absence means required, a real deployment sets nothing at all (invariant 34) |
 
 `VITE_REQUIRE_AUTH` is deliberately absent: `resolveRequireAuth` ignores it in a
 demo build.
@@ -395,6 +443,11 @@ preview: Settings → Environment Variables → tick Preview. Production is unaf
 The GitHub repo is connected, so every push to `master` redeploys to production.
 `vercel --prod` from a working copy does the same thing without a push.
 
-**The demo's assistant endpoint is unauthenticated.** The gate is off, so
-`POST /api/ask-ai` is world-callable and spends whatever key is configured. Give
-it a capped or throwaway key — nothing in the app limits who may ask.
+**The assistant endpoint authorizes its own callers** as of 2026-08-19, so it is no
+longer world-callable — see invariant 34. Two things still follow from that rather
+than being solved by it. A demo build has no session to present, so a demo that
+wants a working assistant has to set `ASK_AI_REQUIRE_AUTH=false` and is then
+spending on anonymous callers again: give that deployment a capped or throwaway
+key, or leave it with no key at all and let the page report itself offline. And the
+rate limit is per-instance and in memory, so the only hard spend ceiling is a cap
+set on the key at the provider.

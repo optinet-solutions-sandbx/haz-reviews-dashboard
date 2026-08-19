@@ -20,7 +20,19 @@ export interface UseAuthResult {
   isAdmin: boolean
   accessLoading: boolean
   refreshAccess: () => Promise<boolean>
+  /**
+   * The current access token, or null when signed out. For `/api/ask-ai`, which
+   * verifies the session server-side before it will spend anything.
+   *
+   * Async and asked for per call, deliberately. An access token is short-lived and
+   * Supabase rotates it; reading `session.access_token` out of render state would
+   * hand out whatever was current at the last render, so a tab left open long
+   * enough would start sending an expired one and the assistant would answer
+   * "your session has expired" to someone who is plainly signed in.
+   */
+  getAccessToken: () => Promise<string | null>
 }
+
 
 /**
  * Session + approval state, plus the pending-action gate.
@@ -176,6 +188,14 @@ export function useAuth(): UseAuthResult {
     setModalOpen(false)
   }, [])
 
+  // getSession() rather than the `session` state: it returns a valid token,
+  // refreshing it first if the current one has expired. Empty deps, so this keeps a
+  // stable identity like requireAuth does and never re-triggers a caller's effect.
+  const getAccessToken = useCallback(
+    async () => (await supabase.auth.getSession()).data.session?.access_token ?? null,
+    [],
+  )
+
   const refreshAccess = useCallback(
     () => lookupAccess(sessionRef.current?.user.id ?? null),
     [lookupAccess],
@@ -193,7 +213,9 @@ export function useAuth(): UseAuthResult {
     isAdmin,
     accessLoading,
     refreshAccess,
+    getAccessToken,
   }
+
 }
 
 /**

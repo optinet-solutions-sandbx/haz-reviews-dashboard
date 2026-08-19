@@ -141,9 +141,15 @@ export function AskAi() {
     ])
 
     try {
+      // Fetched per question, not held in state: the endpoint verifies this token
+      // server-side, and Supabase rotates it, so a thread left open across an
+      // expiry would otherwise start sending a stale one.
+      const token = await ctx.getAccessToken()
+
       await streamAssistant({
         system: ASK_AI_SYSTEM,
         messages: wire,
+        token: token ?? undefined,
         onText: (chunk) =>
           setTurns((prev) => {
             const next = [...prev]

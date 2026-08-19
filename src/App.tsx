@@ -572,6 +572,7 @@ function Layout() {
       addToast,
       requireAuth: auth.requireAuth,
       currentUserId: auth.session?.user.id ?? null,
+      getAccessToken: auth.getAccessToken,
       writeGate,
       isAdmin,
       accessLoading,

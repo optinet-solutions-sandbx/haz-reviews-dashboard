@@ -246,3 +246,52 @@ describe('streamAssistant', () => {
     expect(seen.join('')).toBe('still here')
   })
 })
+
+/**
+ * The endpoint verifies a Supabase session before it will spend anything, so the
+ * caller's token has to reach it. Asserted on the outgoing request rather than on a
+ * mock's call log: a header that is built but not attached would satisfy the latter.
+ *
+ * `assistant.ts` deliberately does not import the Supabase client to fetch this
+ * itself — that module throws at module load without credentials, which is exactly
+ * why devOverrides.ts exists, and importing it here would make this file
+ * untestable. The token is passed in.
+ */
+describe('streamAssistant authorization', () => {
+  function recordingFetch(res: Response) {
+    const seen: Array<Record<string, string>> = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: string, init: RequestInit) => {
+        seen.push((init.headers ?? {}) as Record<string, string>)
+        return res
+      }),
+    )
+    return seen
+  }
+
+  const run = (token?: string) =>
+    streamAssistant({
+      system: 's',
+      messages: [{ role: 'user', content: 'q' }],
+      onText: () => {},
+      token,
+    })
+
+  it('sends the session token as a bearer credential', async () => {
+    const seen = recordingFetch(ndjson(['{"type":"done"}\n']))
+    await run('a.token')
+    expect(seen[0].Authorization).toBe('Bearer a.token')
+  })
+
+  /**
+   * Omitted rather than sent empty. `Authorization: Bearer ` is a malformed
+   * credential, and a gateway may reject it before the endpoint gets to answer with
+   * its own, readable "sign in" message.
+   */
+  it('omits the header entirely when there is no session', async () => {
+    const seen = recordingFetch(ndjson(['{"type":"done"}\n']))
+    await run(undefined)
+    expect('Authorization' in seen[0]).toBe(false)
+  })
+})

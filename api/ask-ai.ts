@@ -13,6 +13,12 @@ import {
   UNCONFIGURED,
   type AskAiEvent,
 } from '../server/askAi.js'
+import {
+  ASK_AI_RATE_LIMIT,
+  askAiGate,
+  createRateLimiter,
+  readAskAiAuthConfig,
+} from '../server/askAiAuth.js'
 
 /**
  * PRODUCTION endpoint for Ask AI, and the deployed counterpart to
@@ -46,6 +52,13 @@ const JSON_HEADERS = { 'Content-Type': 'application/json' }
 const readEnv = (name: string) => process.env[name] ?? ''
 
 /**
+ * Module scope on purpose: a warm instance reuses this between invocations, which
+ * is the only reason a per-instance counter counts anything at all. See the
+ * limiter's own note on why that makes it a speed bump, not a spend guarantee.
+ */
+const limiter = createRateLimiter(ASK_AI_RATE_LIMIT)
+
+/**
  * The readiness probe. Answers JSON so the client can tell "this endpoint exists
  * and is configured" from a static host quietly serving index.html for an unknown
  * path — which is what a deployment without this function does, and which a bare
@@ -59,6 +72,25 @@ export function GET(): Response {
 }
 
 export async function POST(request: Request): Promise<Response> {
+  // Before ANY branch that could spend money, and before the key is even read. An
+  // anonymous caller must not reach the provider, and must not learn from a POST
+  // whether a key is configured either.
+  const refusal = await askAiGate({
+    auth: readAskAiAuthConfig(readEnv),
+    limiter,
+    authorizationHeader: request.headers.get('authorization'),
+    now: Date.now(),
+    fetchImpl: fetch,
+  })
+  if (refusal) {
+    return new Response(JSON.stringify({ error: refusal.error }), {
+      status: refusal.status,
+      headers: refusal.retryAfterSeconds
+        ? { ...JSON_HEADERS, 'Retry-After': String(refusal.retryAfterSeconds) }
+        : JSON_HEADERS,
+    })
+  }
+
   const config = readAskAiConfig(readEnv)
 
   // 503 rather than an error event: "not configured" is a different state from
