@@ -342,30 +342,39 @@ Violating any of these produces silent wrongness rather than an error.
     mistake invariant 22 made. `signInWithOAuth` throws `Unsupported provider` until
     a Google client is configured in the Supabase project, so re-adding the button
     means configuring the provider FIRST, not adding a flag.
-40. **Never put an account password in an env variable.** Asked for on
-    2026-08-19 as `ADMIN_EMAIL` / `ADMIN_PASSWORD` in `.env`, on the reasonable-
-    sounding theory that it would let visitors sign in with the shared admin
-    account. It cannot work, in two stacked ways, and both are worth knowing
-    because the request will recur.
+40. **Never let an account password reach the CLIENT through the environment.**
+    The line is about who can read it, not about which file it sits in — and the
+    first version of this invariant drew it in the wrong place, saying "never put a
+    password in an env variable" full stop, which `.env.local` now contradicts.
 
-    First, it does nothing: no code here reads those names, and an env variable
-    has never created a Supabase user. Only Supabase Auth does. Adding the lines
-    yields a password sitting in a file next to an account that still does not
-    exist.
+    **Forbidden:** any `VITE_`-prefixed credential. Vite **inlines every `VITE_*`
+    value into the client bundle**, so the password would sit in plain text in a JS
+    asset any visitor can open in devtools, permanently, in a git-deployed build.
+    Invariant 27 with a password instead of an API key, and the worse of the two —
+    rotating a leaked provider key costs a minute, whereas a leaked admin password
+    has already been indexed. Asked for on 2026-08-19 in the belief it would let
+    visitors sign in with the shared account; it would not have, because nothing
+    under `src/` reads such a name and the app authenticates through a form.
 
-    Second, and worse, the obvious repair is the actual disaster. For credentials
-    to reach a sign-in form they must reach the browser, which means a `VITE_`
-    prefix, which means Vite **inlines them into the client bundle** — the admin
-    password lands in plain text in a JS asset that anyone can read in devtools,
-    permanently, in a git-deployed build. Invariant 27 with a password instead of
-    an API key, and the worse of the two, because rotating a leaked provider key
-    costs a minute while a leaked admin password has already been indexed.
+    **Allowed, and in use:** `ADMIN_EMAIL` / `ADMIN_PASSWORD`, unprefixed, read by
+    `scripts/verify-supabase.mjs`, which runs in Node and parses `.env.local` off
+    disk itself. That is the `OPENAI_API_KEY` shape — server-side, no `VITE_`, never
+    referenced from `src/` — and it is why `npm run verify:supabase` needs no
+    arguments. `process.env` still wins over the file so a one-off run can override
+    it. Verified by grepping `dist/` for the password, both variable names and the
+    address: all absent.
 
-    A password's only home is the auth provider. If a shared credential is meant
-    to be public, print it in the login page's own copy — that is an intentional
-    disclosure of a value the reader is supposed to have, not a secret smuggled
-    into a bundle. `OPENAI_API_KEY` is the shape to copy: server-side, no `VITE_`,
-    never referenced from `src/`.
+    Two things that follow. Do NOT copy that block into Vercel — the deployment has
+    no reader for it, and a live admin password in a hosting dashboard is the leak
+    this rule exists to prevent. And do NOT make anything in `src/` read those
+    names, which would drag them into the bundle and turn the allowed case into the
+    forbidden one.
+
+    A password's real home is still the auth provider. If a shared credential is
+    ever meant to be public, print it in the login page's own copy — an intentional
+    disclosure of something the reader is supposed to have, rather than a secret
+    smuggled through the build. That is NOT the case today: the shared account is
+    developer-only, so the login page must not advertise it.
 
 ## Conventions
 
