@@ -32,7 +32,7 @@ import {
   upsertSnapshot,
 } from './lib/storage'
 import { DEFAULT_SITE_ID, SITE_BY_SLUG, siteById } from './lib/sites'
-import { getWriteGate, useAuth } from './lib/useAuth'
+import { getIdentityGate, getWriteGate, useAuth } from './lib/useAuth'
 import { AuthGate } from './components/AuthGate'
 import { DuplicateWarning } from './components/DuplicateWarning'
 import { LoginModal } from './components/LoginModal'
@@ -50,15 +50,37 @@ import { AskAi } from './pages/AskAi'
 import { Home } from './pages/Home'
 import { HowItWorks } from './pages/HowItWorks'
 import { Log } from './pages/Log'
+import { Login } from './pages/Login'
 import { NotBuilt } from './pages/NotBuilt'
 import { Rankings } from './pages/Rankings'
+import { ResetPassword } from './pages/ResetPassword'
 import { Sites } from './pages/Sites'
 
 export function App() {
   return (
-    <AuthGate>
-      <Routes>
-        <Route element={<Layout />}>
+    <Routes>
+      {/* OUTSIDE the gate, both of them, and neither is negotiable.
+          /login behind AuthGate is unreachable — the gate renders its own
+          decision instead of the route, so the redirect to /login would match a
+          route that never gets to render and loop.
+          /reset-password is subtler: the emailed recovery link establishes a
+          REAL session, so the gate would wave the user straight through to the
+          dashboard and the screen the email promised would never appear.
+          Both are static single segments, so React Router ranks them above
+          ':siteSlug' and above the layout route's '*' child. */}
+      <Route path="/login" element={<Login />} />
+      <Route path="/reset-password" element={<ResetPassword />} />
+
+      {/* The gate moved from wrapping <Routes> to being part of this layout
+          route's element. Wrapping the whole router put every route behind it,
+          which is what made a sign-in page impossible to add. */}
+      <Route
+        element={
+          <AuthGate>
+            <Layout />
+          </AuthGate>
+        }
+      >
           {/* Home, at the root. A real route rather than a redirect to the
               default property: the sidebar's Home row points here, and a
               redirect would rewrite the URL back to '/hazreviews' the instant it
@@ -186,9 +208,8 @@ export function App() {
               property's summary while keeping its bogus URL. That is the existing
               graceful-fallback behaviour, not a redirect. */}
           <Route path="*" element={<Navigate to="/" replace />} />
-        </Route>
-      </Routes>
-    </AuthGate>
+      </Route>
+    </Routes>
   )
 }
 
@@ -344,7 +365,11 @@ function Layout() {
   // session, so a forced admin still sees "Sign in to make changes" — which is
   // true, and pretending otherwise would offer writes that must fail.
   const isAdmin = DEV_OVERRIDE?.isAdmin ?? auth.isAdmin
-  const accountEmail = DEV_OVERRIDE?.email ?? auth.session?.user.email ?? null
+  // The address and the ability to sign out are resolved TOGETHER but kept
+  // separate, because only one of them can be forced. Reading the sign-out
+  // affordance off the address is what made the footer offer "Sign out" with no
+  // session behind it — a click that could not do anything and did not say so.
+  const identity = getIdentityGate(auth.session, DEV_OVERRIDE?.email ?? null)
   // A forced admin has no access row to wait on, and AdminUsers holds its
   // redirect until this clears.
   const accessLoading = DEV_OVERRIDE ? false : auth.accessLoading
@@ -620,7 +645,8 @@ function Layout() {
         isAdmin={isAdmin}
         groups={groupsWithData}
         activeSite={activeSite}
-        email={accountEmail}
+        email={identity.email}
+        canSignOut={identity.canSignOut}
         onSignIn={auth.openLogin}
         onSignOut={() => void signOut()}
       />

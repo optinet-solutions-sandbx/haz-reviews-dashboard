@@ -44,3 +44,19 @@ export async function sendPasswordReset(email: string): Promise<void> {
   })
   if (error) throw new Error(error.message)
 }
+
+/**
+ * Sets a new password for the CURRENT session.
+ *
+ * Reached two ways, and it is the same call for both: the recovery link from
+ * `sendPasswordReset`, which signs the user in before landing them on
+ * /reset-password, and a signed-in user changing their own password.
+ *
+ * It follows that /reset-password cannot sit behind AuthGate. The recovery link
+ * establishes a real session, so the gate would wave the user straight through to
+ * the dashboard and they would never reach the screen the email promised.
+ */
+export async function updatePassword(password: string): Promise<void> {
+  const { error } = await supabase.auth.updateUser({ password })
+  if (error) throw new Error(error.message)
+}

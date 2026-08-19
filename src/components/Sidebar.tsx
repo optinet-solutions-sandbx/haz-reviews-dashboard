@@ -84,6 +84,12 @@ interface SidebarProps {
   groups: KeywordGroup[]
   activeSite: Site
   email: string | null
+  /**
+   * Whether there is a real session to end. Separate from `email` on purpose:
+   * the address can be forced by VITE_DEV_FORCE_EMAIL, a session cannot, and
+   * deriving the action from the address is what made Sign out a dead button.
+   */
+  canSignOut: boolean
   onSignIn: () => void
   onSignOut: () => void
 }
@@ -156,6 +162,7 @@ function SidebarBody({
   groups,
   activeSite,
   email,
+  canSignOut,
   onSignIn,
   onSignOut,
 }: SidebarProps) {
@@ -385,24 +392,35 @@ function SidebarBody({
         )}
       </nav>
 
-      {/* Footer — identity only, matching the sibling dashboard. */}
+      {/* Footer — identity only, matching the sibling dashboard.
+
+          The ADDRESS and the ACTION are decided separately, and that separation is
+          the whole fix for a bug this shipped with. The address can be forced by
+          VITE_DEV_FORCE_EMAIL — rendering it with no backend is what the flag is
+          for — but a session cannot be forced. Deciding the action from the address
+          therefore offered "Sign out" with nothing to sign out of, and
+          supabase.auth.signOut() short-circuits in that state: no request, no
+          error, no visible change. See getIdentityGate. */}
       <div className="mt-auto shrink-0 px-2 py-3" style={{ borderTop: HAIRLINE }}>
-        {email ? (
-          <Identity email={email} showLabels={showLabels} onSignOut={onSignOut} />
-        ) : (
-          <button
-            type="button"
-            onClick={onSignIn}
-            title="Sign in"
-            className={`${ROW} w-full cursor-pointer`}
-            style={IDLE_ROW}
-          >
-            <span className={ICON_BOX} style={{ color: 'var(--muted-3)' }}>
-              <LogIn size={18} />
-            </span>
-            <span className={labelClass}>Sign in</span>
-          </button>
-        )}
+        <div className={showLabels ? undefined : 'flex flex-col items-center gap-2 py-1'}>
+          {email && <AddressRow email={email} showLabels={showLabels} />}
+          {canSignOut ? (
+            <SignOutRow showLabels={showLabels} onSignOut={onSignOut} />
+          ) : (
+            <button
+              type="button"
+              onClick={onSignIn}
+              title="Sign in"
+              className={`${ROW} w-full cursor-pointer`}
+              style={IDLE_ROW}
+            >
+              <span className={ICON_BOX} style={{ color: 'var(--muted-3)' }}>
+                <LogIn size={18} />
+              </span>
+              <span className={labelClass}>Sign in</span>
+            </button>
+          )}
+        </div>
       </div>
     </>
   )
@@ -449,81 +467,92 @@ function NavRow({
 }
 
 /**
- * Two layouts, not one that adapts: collapsed stacks the avatar over an
- * icon-only sign-out, expanded puts the address on its own line above a
- * full-width row. A single flex row cannot do both without the address either
- * overflowing the 64px rail or wrapping.
+ * WHO the footer is showing. Rendered whenever there is an address, which
+ * includes a forced one with no session behind it — that is the case
+ * VITE_DEV_FORCE_EMAIL exists to produce.
+ *
+ * Two layouts, not one that adapts: collapsed shows the avatar alone, expanded
+ * puts the address beside it. A single flex row cannot do both without the
+ * address either overflowing the 64px rail or wrapping.
  */
-function Identity({
-  email,
+function AddressRow({ email, showLabels }: { email: string; showLabels: boolean }) {
+  if (!showLabels) {
+    return (
+      <span
+        title={email}
+        className="flex h-9 w-9 items-center justify-center rounded-full"
+        style={{ background: 'var(--navy-tint)', color: 'var(--navy-text)' }}
+      >
+        <UserIcon size={18} />
+      </span>
+    )
+  }
+
+  return (
+    <div className="flex items-center gap-2 px-2 pb-2">
+      <span
+        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full"
+        style={{ background: 'var(--navy-tint)', color: 'var(--navy-text)' }}
+      >
+        <UserIcon size={18} />
+      </span>
+      {/* 12px, not the 10px mono this used: the address is prose, not data. */}
+      <p className="min-w-0 truncate text-xs" style={{ color: 'var(--muted)' }} title={email}>
+        {email}
+      </p>
+    </div>
+  )
+}
+
+/**
+ * Ending the session. Rendered only when there IS one — the caller decides that
+ * from `canSignOut`, never from whether an address is on screen.
+ */
+function SignOutRow({
   showLabels,
   onSignOut,
 }: {
-  email: string
   showLabels: boolean
   onSignOut: () => void
 }) {
   if (!showLabels) {
     return (
-      <div className="flex flex-col items-center gap-2 py-1">
-        <span
-          title={email}
-          className="flex h-9 w-9 items-center justify-center rounded-full"
-          style={{ background: 'var(--navy-tint)', color: 'var(--navy-text)' }}
-        >
-          <UserIcon size={18} />
-        </span>
-        <button
-          type="button"
-          onClick={onSignOut}
-          title="Sign out"
-          aria-label="Sign out"
-          // `nav-row` carries the hover ground; the class contributes no
-          // geometry of its own, so the 36px square is unaffected.
-          //
-          // Kept at --muted, NOT the source's lighter neutral-400 tint. Collapsed,
-          // the icon IS the entire control, and at 2.6:1 that tint fails
-          // SC 1.4.11 — the shared system's own rule bans it for exactly this
-          // case and permits it only beside a visible label.
-          className="nav-row flex h-9 w-9 cursor-pointer items-center justify-center rounded-lg transition-colors"
-          style={{ color: 'var(--muted)' }}
-        >
-          <LogOut size={18} />
-        </button>
-      </div>
-    )
-  }
-
-  return (
-    <>
-      <div className="flex items-center gap-2 px-2 pb-2">
-        <span
-          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full"
-          style={{ background: 'var(--navy-tint)', color: 'var(--navy-text)' }}
-        >
-          <UserIcon size={18} />
-        </span>
-        {/* 12px, not the 10px mono this used: the address is prose, not data. */}
-        <p className="min-w-0 truncate text-xs" style={{ color: 'var(--muted)' }} title={email}>
-          {email}
-        </p>
-      </div>
-      {/* Not built on ROW. The source insets this row with pl-4 and no left
-          border, which puts its glyph 4px right of the nav's optical column —
-          a deliberate copy of that measurement, not an oversight. Sharing ROW
-          would silently pull it back to 20px. */}
       <button
         type="button"
         onClick={onSignOut}
         title="Sign out"
-        className="nav-row flex w-full cursor-pointer items-center gap-3 rounded-lg py-2 pl-4 pr-3 text-[12px] font-semibold transition-colors"
+        aria-label="Sign out"
+        // `nav-row` carries the hover ground; the class contributes no
+        // geometry of its own, so the 36px square is unaffected.
+        //
+        // Kept at --muted, NOT the source's lighter neutral-400 tint. Collapsed,
+        // the icon IS the entire control, and at 2.6:1 that tint fails
+        // SC 1.4.11 — the shared system's own rule bans it for exactly this
+        // case and permits it only beside a visible label.
+        className="nav-row flex h-9 w-9 cursor-pointer items-center justify-center rounded-lg transition-colors"
         style={{ color: 'var(--muted)' }}
       >
-        {/* Unwrapped, so the glyph inherits the row's colour instead of taking a
-            separate tint — the source draws icon and label alike here. */}
-        <LogOut size={18} className="shrink-0" />
-        <span className="whitespace-nowrap text-glow">Sign out</span>
+        <LogOut size={18} />
       </button>
-    </>
+    )
+  }
+
+  return (
+    /* Not built on ROW. The source insets this row with pl-4 and no left
+       border, which puts its glyph 4px right of the nav's optical column —
+       a deliberate copy of that measurement, not an oversight. Sharing ROW
+       would silently pull it back to 20px. */
+    <button
+      type="button"
+      onClick={onSignOut}
+      title="Sign out"
+      className="nav-row flex w-full cursor-pointer items-center gap-3 rounded-lg py-2 pl-4 pr-3 text-[12px] font-semibold transition-colors"
+      style={{ color: 'var(--muted)' }}
+    >
+      {/* Unwrapped, so the glyph inherits the row's colour instead of taking a
+          separate tint — the source draws icon and label alike here. */}
+      <LogOut size={18} className="shrink-0" />
+      <span className="whitespace-nowrap text-glow">Sign out</span>
+    </button>
   )
 }

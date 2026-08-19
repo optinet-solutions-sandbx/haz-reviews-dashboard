@@ -96,3 +96,31 @@ export function resolveRequireAuth(env: DevEnv & { VITE_REQUIRE_AUTH?: string })
   if (isDemoBuild(env)) return false
   return env.VITE_REQUIRE_AUTH === 'true'
 }
+
+/**
+ * Whether to offer "Continue with Google" on the sign-in portal.
+ *
+ * Opt-IN, which is the opposite of how every other flag in this file reads, and
+ * deliberately so: this one's failure direction is reversed. `signInWithOAuth`
+ * throws `Unsupported provider` until a Google OAuth client is configured in the
+ * Supabase project, so the default has to be the state that is always correct.
+ * A portal with no Google button reads as "this app uses passwords"; a portal
+ * with one that errors reads as "this app is broken", and that is the first
+ * thing a new user would see.
+ *
+ * Exactly 'true' for the same reason the others are — a commented-out line
+ * usually reads as an empty string.
+ */
+// Takes the whole DevEnv for the reason resolveRequireAuth documents: a parameter
+// of only optional VITE_ properties is a WEAK TYPE, ImportMetaEnv declares none
+// of them, and the one call site that matters would not compile. `DEV` is the
+// property they have in common.
+export function resolveGoogleAuth(env: DevEnv & { VITE_ENABLE_GOOGLE_AUTH?: string }): boolean {
+  // A demo build has no Supabase project at all, so the provider cannot have
+  // been configured there by definition.
+  if (isDemoBuild(env)) return false
+  return env.VITE_ENABLE_GOOGLE_AUTH === 'true'
+}
+
+/** Resolved once at module load, like DEV_OVERRIDE. */
+export const GOOGLE_AUTH_ENABLED = resolveGoogleAuth(import.meta.env)

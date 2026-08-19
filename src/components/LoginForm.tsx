@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { sendPasswordReset, signIn, signInWithGoogle, signUp } from '../lib/auth'
+import { GOOGLE_AUTH_ENABLED } from '../lib/devOverrides'
 
 type Mode = 'signin' | 'signup' | 'reset'
 
@@ -10,10 +11,22 @@ const COPY: Record<Mode, { title: string; action: string }> = {
 }
 
 /**
- * The shared credential form, used by both the full-page Login and the inline
- * LoginModal, so the two can never drift apart in behaviour or copy.
+ * The shared credential form, used by the /login portal, the whole-app AuthGate
+ * and the inline LoginModal, so the three can never drift apart in behaviour or
+ * copy.
+ *
+ * `heading` exists for invariant 25 — a page gets exactly one <h1>. On the portal
+ * this form's title IS the page title; in the modal the page underneath already
+ * owns its <h1>, so the default stays 'h2'.
  */
-export function LoginForm({ onSignedIn }: { onSignedIn?: () => void }) {
+export function LoginForm({
+  onSignedIn,
+  heading = 'h2',
+}: {
+  onSignedIn?: () => void
+  heading?: 'h1' | 'h2'
+}) {
+  const Heading = heading
   const [mode, setMode] = useState<Mode>('signin')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -46,9 +59,9 @@ export function LoginForm({ onSignedIn }: { onSignedIn?: () => void }) {
 
   return (
     <form onSubmit={submit} className="flex flex-col gap-3">
-      <h2 className="font-display text-[17px] font-semibold" style={{ color: 'var(--ink)' }}>
+      <Heading className="font-display text-[17px] font-semibold" style={{ color: 'var(--ink)' }}>
         {COPY[mode].title}
-      </h2>
+      </Heading>
 
       <label className="flex flex-col gap-1">
         <span
@@ -109,14 +122,20 @@ export function LoginForm({ onSignedIn }: { onSignedIn?: () => void }) {
         {busy ? 'Working…' : COPY[mode].action}
       </button>
 
-      <button
-        type="button"
-        onClick={() => void signInWithGoogle()}
-        className="rounded-lg py-2 text-[12px] font-medium"
-        style={{ border: '1px solid var(--border)', color: 'var(--text-2)' }}
-      >
-        Continue with Google
-      </button>
+      {/* Hidden unless a Google OAuth client is actually configured in the
+          Supabase project. signInWithOAuth throws 'Unsupported provider'
+          otherwise, and an erroring button on the first screen a new user sees
+          reads as a broken app rather than as an unconfigured provider. */}
+      {GOOGLE_AUTH_ENABLED && (
+        <button
+          type="button"
+          onClick={() => void signInWithGoogle()}
+          className="rounded-lg py-2 text-[12px] font-medium"
+          style={{ border: '1px solid var(--border)', color: 'var(--text-2)' }}
+        >
+          Continue with Google
+        </button>
+      )}
 
       <div className="flex justify-between text-[11px]">
         <button
@@ -138,11 +157,14 @@ export function LoginForm({ onSignedIn }: { onSignedIn?: () => void }) {
       </div>
 
       {/* Google OAuth reloads the page, so a pending action captured by
-          requireAuth cannot survive it. Saying so beats a silent no-op. */}
-      <p className="text-[10px] leading-snug" style={{ color: 'var(--muted-3)' }}>
-        Signing in with Google reloads the page — you may need to click what you were
-        doing again.
-      </p>
+          requireAuth cannot survive it. Saying so beats a silent no-op — but only
+          where the button it describes is actually rendered. */}
+      {GOOGLE_AUTH_ENABLED && (
+        <p className="text-[10px] leading-snug" style={{ color: 'var(--muted-3)' }}>
+          Signing in with Google reloads the page — you may need to click what you were
+          doing again.
+        </p>
+      )}
     </form>
   )
 }
