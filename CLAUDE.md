@@ -475,13 +475,24 @@ that probe into a plain insert, and do not upgrade the read check to PASS on zer
 rows.
 
 A note on that account, because it is unusual and a future session will otherwise
-try to "fix" it: it is ONE SHARED credential, intended by the requestor to be handed
-to anyone who has the app's link. It is not an oversight. The cost was stated
-plainly — every holder can approve/revoke users, delete every snapshot, and spend
-`OPENAI_API_KEY` through Ask AI — and the requestor confirmed it three times. The
-narrower option (approved but not admin, plus a separate real admin) remains
-available and is a one-line change to the seed. Credentials are NOT stored in this
-repo or in any env file, and must not be: see the note below on why an
+try to "fix" it. It is ONE SHARED credential with full admin, and that is
+deliberate: it is shared **within the admin/developer group only**, as a team ops
+login. Not a public or stakeholder credential. An earlier version of this section
+said it was meant for "anyone who has the app's link" — that was a misreading,
+corrected 2026-08-19, and the distinction is the whole reason full admin is the
+right level here rather than a mistake to undo.
+
+Two consequences follow from it being shared at all, neither a blocker:
+`activity_log` attributes every action to `admin@dashboard.com`, so the audit trail
+records what happened but not which developer did it; and the password cannot be
+rotated for one person, so a departure means rotating for everyone. Per-person
+accounts are the fix if either ever matters — `handle_new_user` plus an admin
+approval already supports them.
+
+It must NOT be advertised on the login page. That was floated while the credential
+was believed to be public, where printing it would have been an intentional
+disclosure; for a developer-only login it is simply a leak. Credentials are not
+stored in this repo or in any env file either — see invariant 40 on why an
 `ADMIN_PASSWORD` variable cannot work.
 
 Until then `VITE_DEV_FORCE_ADMIN=true` forces `isAdmin` and an account email so the
