@@ -376,6 +376,41 @@ Violating any of these produces silent wrongness rather than an error.
     smuggled through the build. That is NOT the case today: the shared account is
     developer-only, so the login page must not advertise it.
 
+41. **Never open `LoginModal` from a control that has no pending action.** The
+    sidebar footer's identity buttons navigate to the `/login` ROUTE, via
+    `nextParamFor` — the same URL `AuthGate` builds, so a gated build's behaviour
+    is unchanged and signing back in returns the user to the page they left.
+    `openLogin` was deleted rather than left unused (invariant 39's rule), so the
+    modal is now reachable ONLY through `requireAuth`.
+
+    That split is the whole point. `requireAuth`'s caller is holding a promise
+    that has to settle — an Import click captured mid-flight — and navigating
+    would throw the action away, so the overlay is right there and only there. A
+    deliberate "sign in" captures nothing, and answering it with a modal cost the
+    app its one route to `/login`: no address to bookmark, no page title, no
+    recovery copy.
+
+    The failure was CONFIG-DEPENDENT, which is why it survived. Sign-out never
+    navigated on its own; it called `signOut()` and left the gate to bounce the
+    session-less user, and that redirect is behind `REQUIRE_AUTH`, which
+    `resolveRequireAuth` forces OFF in a demo build. So on the deployed demo
+    nothing moved at all — and because a demo can hold no session, `canSignOut` is
+    false and the footer's only identity control is "Sign in", the modal. Reported
+    from the live site as "sign out gives me a portal log-in". Both handlers own
+    their navigation now instead of inheriting it from whether the gate happens to
+    be mounted.
+
+    `await signOut()` BEFORE navigating, and the order is load-bearing: `/login`
+    renders `<Navigate to={next} replace />` for anyone still holding a session, so
+    navigating first bounces straight back to the dashboard and reads as a dead
+    button. Sign-out uses `replace`, sign-in does not — Back must not return to the
+    view someone just signed out of, but must return to the page they were
+    browsing when they chose to sign in.
+
+    `tsc -b`, `vite build` and all 317 tests passed throughout, before and after.
+    Wiring has no unit-test surface here (node environment, no DOM), so this was
+    caught and fixed in a browser — invariant 33's lesson again.
+
 ## Conventions
 
 | Convention | Detail |

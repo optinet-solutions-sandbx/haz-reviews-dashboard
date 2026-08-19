@@ -11,9 +11,12 @@ interface PendingAction {
 export interface UseAuthResult {
   session: Session | null
   sessionLoading: boolean
+  /**
+   * Open only while requireAuth is holding a PENDING ACTION. There is
+   * deliberately no bare opener beside it — see the note above `cancelAuth`.
+   */
   modalOpen: boolean
   requireAuth: <T>(fn: () => T | Promise<T>) => Promise<T>
-  openLogin: () => void
   cancelAuth: () => void
   status: UserAccessStatus | null
   isApproved: boolean
@@ -180,8 +183,19 @@ export function useAuth(): UseAuthResult {
     })
   }, [])
 
-  const openLogin = useCallback(() => setModalOpen(true), [])
-
+  /**
+   * There is no `openLogin` here on purpose, and re-adding one would restore a
+   * shipped bug. It existed as `() => setModalOpen(true)` and the sidebar footer
+   * called it, so the one control a signed-out visitor is most likely to click
+   * raised a modal that could never navigate: no address, no page title, and on
+   * a demo build — where the footer's only identity action is "Sign in" — the
+   * sole route to /login, which the app has, was unreachable from the UI.
+   *
+   * The modal is now reachable ONLY through requireAuth, whose caller is holding
+   * a promise that has to settle; that is the one case where staying on the page
+   * is worth an overlay. Everything else belongs on the /login route, and
+   * App.tsx's footer handlers navigate there.
+   */
   const cancelAuth = useCallback(() => {
     pending.current?.reject(new Error('Sign-in cancelled'))
     pending.current = null
@@ -206,7 +220,6 @@ export function useAuth(): UseAuthResult {
     sessionLoading,
     modalOpen,
     requireAuth,
-    openLogin,
     cancelAuth,
     status,
     isApproved: status === 'approved',
