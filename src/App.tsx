@@ -5,6 +5,7 @@ import {
   Route,
   Routes,
   useLocation,
+  useNavigate,
   useOutletContext,
 } from 'react-router-dom'
 import type {
@@ -20,6 +21,7 @@ import type {
 import { logActivity } from './lib/activityLog'
 import { applyCarryForward } from './lib/carryForward'
 import { signOut } from './lib/auth'
+import { nextParamFor } from './lib/authRedirect'
 import { DEV_FIXTURE } from './lib/devFixture'
 import { DEV_OVERRIDE } from './lib/devOverrides'
 import { GROUPS, OTHER_GROUP, groupForKeyword } from './lib/groups'
@@ -238,6 +240,7 @@ function RankingGate({ children }: { children: React.ReactNode }) {
  */
 function Layout() {
   const location = useLocation()
+  const navigate = useNavigate()
   const auth = useAuth()
 
   // Parsed from the path rather than useParams: Layout is the PARENT of the
@@ -578,6 +581,56 @@ function Layout() {
     })
   }, [auth])
 
+  /* ─── The footer identity actions ──────────────────────────────────────────
+
+     Both go to the /login ROUTE. Neither may open LoginModal, and the split is
+     the point rather than a duplication to tidy away later.
+
+     The modal belongs to requireAuth alone, where a PENDING ACTION is holding a
+     promise that has to settle — an Import click captured mid-flight. Navigating
+     there would throw that action away and unmount the dialog it was about to
+     open. A deliberate "sign in" from the footer captures nothing, so it has no
+     reason to trap the user in an overlay: the portal has an address to bookmark,
+     a page title, and the recovery copy the modal has no room for.
+
+     Sign OUT reached the portal by accident until now, and only on some builds:
+     it just called signOut() and left AuthGate to bounce the session-less user
+     to /login. That redirect is behind REQUIRE_AUTH, which `resolveRequireAuth`
+     forces OFF in a demo build — so on the deployed demo nothing navigated at
+     all, and the only footer control there is "Sign in", which opened the modal.
+     Owning the navigation here makes the behaviour identical on every build
+     instead of a side effect of whether the gate happens to be mounted.
+
+     `nextParamFor` rather than a bare '/login', so signing back in returns to the
+     page the user was on. It is the exact URL AuthGate builds, so a gated build's
+     behaviour is unchanged — both now navigate to the same place. */
+  const handleSignIn = useCallback(() => {
+    navigate(nextParamFor(location.pathname, location.search))
+  }, [navigate, location.pathname, location.search])
+
+  const handleSignOut = useCallback(async () => {
+    // Resolved BEFORE the await, off this render's location — after signing out
+    // the gate may already have moved the user, and the page they LEFT is the one
+    // worth returning them to.
+    const portal = nextParamFor(location.pathname, location.search)
+    try {
+      // Awaited, and that is load-bearing: /login renders <Navigate to={next}/>
+      // for anyone holding a session, so navigating before the sign-out settles
+      // bounces straight back to the dashboard and reads as a dead button.
+      await signOut()
+    } catch (err) {
+      // A failed sign-out leaves the session intact. Say so rather than
+      // navigating to a portal that would immediately bounce the user back.
+      addToast(err instanceof Error ? err.message : String(err), 'error')
+      return
+    }
+    // `replace`, unlike the sign-in above: Back must not return to the view the
+    // user just signed out of. On a gated build AuthGate has usually replaced the
+    // entry already, so pushing here would stack a second /login and leave Back
+    // pointing at /login itself.
+    navigate(portal, { replace: true })
+  }, [navigate, addToast, location.pathname, location.search])
+
   const context: HzOutletContext = useMemo(
     () => ({
       activeSite,
@@ -647,8 +700,8 @@ function Layout() {
         activeSite={activeSite}
         email={identity.email}
         canSignOut={identity.canSignOut}
-        onSignIn={auth.openLogin}
-        onSignOut={() => void signOut()}
+        onSignIn={handleSignIn}
+        onSignOut={() => void handleSignOut()}
       />
 
       {/* Reserves the rail's footprint. The aside is `fixed`, so without this the
