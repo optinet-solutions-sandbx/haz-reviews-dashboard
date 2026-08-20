@@ -886,8 +886,8 @@ described one until that date. Its environment variables:
 | `VITE_SUPABASE_URL` | real project URL | the data path; `supabase.ts` throws at module load without it and the app white-screens |
 | `VITE_SUPABASE_ANON_KEY` | real anon key | same. Public by design and inlined into the bundle — RLS is what protects the data (invariant 10) |
 | `VITE_REQUIRE_AUTH` | `true` | the whole app sits behind sign-in plus admin approval |
-| `OPENAI_API_KEY` | absent today | Ask AI reports itself offline until one is added, which is the probe working as designed |
-| `OPENAI_MODEL` | optional, e.g. `gpt-4o-mini` | defaults to `gpt-4o` |
+| `OPENAI_API_KEY` | **set** (Preview + Production) | this row said "absent today" until 2026-08-20; the live probe answers `{"assistant":"ready","model":"gpt-4o-mini"}`, so the assistant is ON and spending is live. Cap the key at the provider — the rate limit is per-instance and in memory (invariant 34) |
+| `OPENAI_MODEL` | **set to `gpt-4o-mini`** | defaults to `gpt-4o` if absent. Confirmed by the probe rather than by `vercel env ls`, which cannot read a value back |
 | `SITES_API_KEY` | real BPN key, set on Production 2026-08-20 | the ranking-API import. SERVER-SIDE ONLY, no `VITE_` prefix (invariant 27) — it reaches a third-party panel holding 135 domains belonging to other properties. Without it the import modal's Ranking API tab reports itself unavailable and says why; the spreadsheet source is unaffected |
 | `ASK_AI_REQUIRE_AUTH` | **ABSENT**, and must stay absent | absence means REQUIRED (invariant 34), and it now gates BOTH endpoints (invariant 43) — so leaving it behind on a real deployment would reopen an anonymous OpenAI proxy AND an anonymous proxy onto the vendor's whole panel. It was `false` under demo mode because a demo can hold no session |
 
@@ -931,14 +931,26 @@ that is the moment the endpoint can start spending: the
 rate limit is per-instance and in memory, so the only hard spend ceiling is a cap
 set on the key at the provider.
 
-**`api/bpn-ranks.ts` has not been deployed yet.** `SITES_API_KEY` is set on
-Production, but the function reaching it is only on the `feat/bpn-ranks-import`
-branch, so nothing on the live site serves that path today — the deployed page would
-report the import unavailable, which is the probe working as designed. Note that
-`vercel env ls` showing the variable proves nothing about its VALUE: `vercel env pull`
-cannot read encrypted values back, so the only honest check is behavioural, and here
-it is a good one — hit the deployed `/api/bpn-ranks` with no `action` after merging.
-`{"ranks":"ready"}` means the key is non-empty; `{"ranks":"unconfigured"}` means the
-stdin trap above swallowed it. That is the same "read the write row, not the read row"
-discipline `verify:supabase` uses, and it costs one anonymous GET because the probe
-is deliberately ungated.
+**`api/bpn-ranks.ts` is DEPLOYED and verified in production as of 2026-08-20.**
+Pushed straight to `master`, which the GitHub integration built in 18 seconds.
+Verified behaviourally rather than by reading configuration, because `vercel env ls`
+showing a variable proves nothing about its VALUE — `vercel env pull` cannot read
+encrypted values back, so an empty string looks identical to a real key from the
+outside. The probe is what tells them apart, and it is one anonymous GET because it
+is deliberately ungated:
+
+| Live check | Result |
+|---|---|
+| `GET /api/bpn-ranks` (no action) | `{"ranks":"ready"}` — so the stdin trap did NOT swallow the key |
+| `GET ?action=domains`, anonymous | `401 Sign in to import ranking data.` |
+| `GET ?action=check_all`, anonymous | `401` — the gate fires before the allow-list |
+| `POST` / `DELETE` | `405` both. **Not a 504**, which is what a default export would have produced (invariant 32) |
+| `GET ?action=results&domain=hazreviews.com`, authorized | `200`, `rowCount: 0` |
+| `GET ?action=results&domain=gulfrecoverygroup.com`, authorized | `200`, `rowCount: 144` — the deployed function really does reach the vendor |
+| `GET ?action=check_all`, authorized | `403` with the allowed list |
+| invalid domain, authorized | `400` |
+| `GET /api/ask-ai` | still `{"assistant":"ready"}` — the `endpointAuth` rename broke nothing |
+
+The `405` row is the one worth keeping: it is the only cheap proof that the named
+`GET` export selected Vercel's Web signature. A default export would have answered
+these with a 60-second hang and a 504, and nothing local would have caught it.
