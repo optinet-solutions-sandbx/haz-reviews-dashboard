@@ -1,4 +1,5 @@
 import OpenAI from 'openai'
+import type { EndpointFeature } from './endpointAuth.js'
 
 /**
  * The provider-facing core of Ask AI, shared by the two hosts that expose it:
@@ -158,4 +159,25 @@ export async function streamAskAi(
   } catch (err) {
     send({ type: 'error', message: err instanceof Error ? err.message : String(err) })
   }
+}
+
+// ─── Endpoint gate wiring ────────────────────────────────────────────────────
+
+/**
+ * Deliberately generous: a reader working through a dashboard asks a handful of
+ * follow-ups, and a limit that interrupts normal use would get raised to something
+ * meaningless the first time it fired.
+ *
+ * Moved here from the gate module when a second endpoint started sharing it — an
+ * ask-ai-specific ceiling sitting in a generic file invites the next endpoint to
+ * reuse it by accident, and a ranking pull and a chat question are not the same
+ * unit of work.
+ */
+export const ASK_AI_RATE_LIMIT = { limit: 20, windowMs: 5 * 60_000 } as const
+
+/** How the shared gate names this feature when it refuses a caller. */
+export const ASK_AI_FEATURE: EndpointFeature = {
+  signInTo: 'use the assistant',
+  subject: 'The assistant',
+  requests: 'questions',
 }

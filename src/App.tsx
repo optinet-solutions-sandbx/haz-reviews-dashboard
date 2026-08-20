@@ -750,6 +750,10 @@ function Layout() {
       {showUpload && (
         <UploadModal
           defaultSiteId={activeSite.id}
+          // The ranking-API source needs a bearer token for the endpoint's own
+          // server-side check. Resolved per pull rather than passed as a value, so a
+          // modal left open never sends one that expired while it sat there.
+          getAccessToken={auth.getAccessToken}
           onClose={() => setShowUpload(false)}
           onConfirm={handleUploadConfirm}
         />

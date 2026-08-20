@@ -1,4 +1,7 @@
 {
   "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }],
-  "functions": { "api/ask-ai.ts": { "maxDuration": 60 } }
+  "functions": {
+    "api/ask-ai.ts": { "maxDuration": 60 },
+    "api/bpn-ranks.ts": { "maxDuration": 60 }
+  }
 }

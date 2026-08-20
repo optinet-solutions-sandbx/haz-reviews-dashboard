@@ -1,37 +1,40 @@
 import { describe, expect, it } from 'vitest'
 import {
-  askAiGate,
-  authorizeAskAi,
+  endpointGate,
+  authorizeCaller,
   createRateLimiter,
   bearerToken,
-  readAskAiAuthConfig,
-  type AskAiAuthConfig,
-} from './askAiAuth'
+  readEndpointAuthConfig,
+  type EndpointAuthConfig,
+  type EndpointFeature,
+} from './endpointAuth'
 
 /**
- * Authorization for the assistant endpoint.
+ * Authorization for every credentialled endpoint here.
  *
- * Tested here rather than through either host because the failure mode is a silent
- * open door: `/api/ask-ai` spends a real API key, and a check that quietly resolves
- * to "allowed" costs money without erroring anywhere. Every default in here is
+ * Tested at this level rather than through any host because the failure mode is a
+ * silent open door, and both endpoints behind this gate spend somebody's money:
+ * `/api/ask-ai` burns `OPENAI_API_KEY`, and `/api/bpn-ranks` is a proxy onto a
+ * third-party panel billed to `SITES_API_KEY`. A check that quietly resolves to
+ * "allowed" costs money without erroring anywhere. Every default in here is
  * asserted in the closed direction on purpose.
  */
 
 /** A `read` that only knows the names it is given, like a sparse environment. */
 const env = (vars: Record<string, string>) => (name: string) => vars[name] ?? ''
 
-describe('readAskAiAuthConfig', () => {
+describe('readEndpointAuthConfig', () => {
   /**
    * The load-bearing default. An endpoint that spends money must not become
    * world-callable because a variable was forgotten during a deploy — so absence
    * means locked, and only an explicit opt-out opens it.
    */
   it('requires auth when the flag is absent', () => {
-    expect(readAskAiAuthConfig(env({})).required).toBe(true)
+    expect(readEndpointAuthConfig(env({})).required).toBe(true)
   })
 
   it('opens the endpoint for an explicit false', () => {
-    expect(readAskAiAuthConfig(env({ ASK_AI_REQUIRE_AUTH: 'false' })).required).toBe(false)
+    expect(readEndpointAuthConfig(env({ ASK_AI_REQUIRE_AUTH: 'false' })).required).toBe(false)
   })
 
   /**
@@ -41,7 +44,7 @@ describe('readAskAiAuthConfig', () => {
    */
   it('treats any other value as still requiring auth', () => {
     for (const value of ['true', 'FALSE', '0', 'no', '', 'off']) {
-      expect(readAskAiAuthConfig(env({ ASK_AI_REQUIRE_AUTH: value })).required).toBe(true)
+      expect(readEndpointAuthConfig(env({ ASK_AI_REQUIRE_AUTH: value })).required).toBe(true)
     }
   })
 
@@ -51,7 +54,7 @@ describe('readAskAiAuthConfig', () => {
    * them server-side is not a leak: both are public by construction.
    */
   it('prefers un-prefixed Supabase values and falls back to the VITE_ ones', () => {
-    const both = readAskAiAuthConfig(
+    const both = readEndpointAuthConfig(
       env({
         SUPABASE_URL: 'https://server.supabase.co',
         VITE_SUPABASE_URL: 'https://client.supabase.co',
@@ -64,7 +67,7 @@ describe('readAskAiAuthConfig', () => {
 
   /** A trailing slash would produce a double slash in the verification URL. */
   it('strips a trailing slash from the project URL', () => {
-    expect(readAskAiAuthConfig(env({ SUPABASE_URL: 'https://x.supabase.co/' })).supabaseUrl).toBe(
+    expect(readEndpointAuthConfig(env({ SUPABASE_URL: 'https://x.supabase.co/' })).supabaseUrl).toBe(
       'https://x.supabase.co',
     )
   })
@@ -100,9 +103,9 @@ describe('bearerToken', () => {
   })
 })
 
-// ─── authorizeAskAi ──────────────────────────────────────────────────────────
+// ─── authorizeCaller ──────────────────────────────────────────────────────────
 
-const CONFIGURED: AskAiAuthConfig = {
+const CONFIGURED: EndpointAuthConfig = {
   required: true,
   supabaseUrl: 'https://proj.supabase.co',
   anonKey: 'anon-key',
@@ -135,21 +138,33 @@ const json = (body: unknown, status = 200) =>
 
 const approved = [{ user_id: 'user-1', status: 'approved' }]
 
-describe('authorizeAskAi', () => {
+/**
+ * Deliberately NOT the assistant's wording. Every refusal string is interpolated
+ * from this, so a copy line that hardcoded 'the assistant' fails here rather than
+ * passing by coincidence — which is the whole failure this parameter prevents: one
+ * shared gate telling a user to sign in to a feature they never touched.
+ */
+const FEATURE: EndpointFeature = {
+  signInTo: 'do the thing',
+  subject: 'The thing',
+  requests: 'things',
+}
+
+describe('authorizeCaller', () => {
   /**
    * Dev and the demo build have no session to present, so the opt-out has to be a
    * real bypass — and it must not cost a round trip to reach.
    */
   it('allows the caller and makes no request when auth is not required', async () => {
     const { impl, calls } = fakeFetch(json(approved))
-    const result = await authorizeAskAi({ ...CONFIGURED, required: false }, '', impl)
+    const result = await authorizeCaller({ ...CONFIGURED, required: false }, '', impl, FEATURE)
     expect(result.ok).toBe(true)
     expect(calls).toHaveLength(0)
   })
 
   it('refuses with 401 when no token is presented', async () => {
     const { impl, calls } = fakeFetch(json(approved))
-    const result = await authorizeAskAi(CONFIGURED, '', impl)
+    const result = await authorizeCaller(CONFIGURED, '', impl, FEATURE)
     expect(result).toMatchObject({ ok: false, status: 401 })
     expect(calls).toHaveLength(0)
   })
@@ -162,10 +177,11 @@ describe('authorizeAskAi', () => {
    */
   it('refuses rather than allowing when auth is required but Supabase is unconfigured', async () => {
     const { impl, calls } = fakeFetch(json(approved))
-    const result = await authorizeAskAi(
+    const result = await authorizeCaller(
       { required: true, supabaseUrl: '', anonKey: '' },
       'a.token',
       impl,
+      FEATURE,
     )
     expect(result.ok).toBe(false)
     expect(calls).toHaveLength(0)
@@ -173,7 +189,7 @@ describe('authorizeAskAi', () => {
 
   it('allows an approved caller and reports their user id', async () => {
     const { impl } = fakeFetch(json(approved))
-    expect(await authorizeAskAi(CONFIGURED, 'a.token', impl)).toEqual({
+    expect(await authorizeCaller(CONFIGURED, 'a.token', impl, FEATURE)).toEqual({
       ok: true,
       userId: 'user-1',
     })
@@ -185,7 +201,7 @@ describe('authorizeAskAi', () => {
    */
   it('refuses with 401 when the project rejects the token', async () => {
     const { impl } = fakeFetch(json({ message: 'JWT expired' }, 401))
-    expect(await authorizeAskAi(CONFIGURED, 'expired.token', impl)).toMatchObject({
+    expect(await authorizeCaller(CONFIGURED, 'expired.token', impl, FEATURE)).toMatchObject({
       ok: false,
       status: 401,
     })
@@ -198,7 +214,7 @@ describe('authorizeAskAi', () => {
    */
   it('refuses an authenticated caller with no access row', async () => {
     const { impl } = fakeFetch(json([]))
-    expect(await authorizeAskAi(CONFIGURED, 'a.token', impl)).toMatchObject({
+    expect(await authorizeCaller(CONFIGURED, 'a.token', impl, FEATURE)).toMatchObject({
       ok: false,
       status: 403,
     })
@@ -206,7 +222,7 @@ describe('authorizeAskAi', () => {
 
   it('refuses a pending account', async () => {
     const { impl } = fakeFetch(json([{ user_id: 'user-1', status: 'pending' }]))
-    expect(await authorizeAskAi(CONFIGURED, 'a.token', impl)).toMatchObject({
+    expect(await authorizeCaller(CONFIGURED, 'a.token', impl, FEATURE)).toMatchObject({
       ok: false,
       status: 403,
     })
@@ -214,7 +230,7 @@ describe('authorizeAskAi', () => {
 
   it('refuses a revoked account', async () => {
     const { impl } = fakeFetch(json([{ user_id: 'user-1', status: 'revoked' }]))
-    expect(await authorizeAskAi(CONFIGURED, 'a.token', impl)).toMatchObject({
+    expect(await authorizeCaller(CONFIGURED, 'a.token', impl, FEATURE)).toMatchObject({
       ok: false,
       status: 403,
     })
@@ -223,14 +239,14 @@ describe('authorizeAskAi', () => {
   /** Fail closed on an unreachable or broken project, not open. */
   it('refuses when the project answers an unexpected status', async () => {
     const { impl } = fakeFetch(json({ message: 'boom' }, 500))
-    expect((await authorizeAskAi(CONFIGURED, 'a.token', impl)).ok).toBe(false)
+    expect((await authorizeCaller(CONFIGURED, 'a.token', impl, FEATURE)).ok).toBe(false)
   })
 
   it('refuses when the verification request throws', async () => {
     const { impl } = fakeFetch(() => {
       throw new Error('ECONNREFUSED')
     })
-    expect((await authorizeAskAi(CONFIGURED, 'a.token', impl)).ok).toBe(false)
+    expect((await authorizeCaller(CONFIGURED, 'a.token', impl, FEATURE)).ok).toBe(false)
   })
 
   /**
@@ -240,7 +256,7 @@ describe('authorizeAskAi', () => {
    */
   it('presents both the project key and the caller token', async () => {
     const { impl, calls } = fakeFetch(json(approved))
-    await authorizeAskAi(CONFIGURED, 'a.token', impl)
+    await authorizeCaller(CONFIGURED, 'a.token', impl, FEATURE)
     expect(calls).toHaveLength(1)
     expect(calls[0].url).toContain('/rest/v1/user_access')
     expect(calls[0].headers.apikey).toBe('anon-key')
@@ -309,7 +325,7 @@ describe('createRateLimiter', () => {
   })
 })
 
-// ─── askAiGate ───────────────────────────────────────────────────────────────
+// ─── endpointGate ───────────────────────────────────────────────────────────────
 
 /**
  * The single entry point both hosts call. It exists so the ORDER of the checks
@@ -317,9 +333,10 @@ describe('createRateLimiter', () => {
  * doing the same three things in their own order is how dev ends up permitting what
  * production refuses, which is the drift the shared core exists to prevent.
  */
-describe('askAiGate', () => {
-  const gateOpts = (over: Partial<Parameters<typeof askAiGate>[0]> = {}) => ({
+describe('endpointGate', () => {
+  const gateOpts = (over: Partial<Parameters<typeof endpointGate>[0]> = {}) => ({
     auth: CONFIGURED,
+    feature: FEATURE,
     limiter: createRateLimiter({ limit: 2, windowMs: 60_000 }),
     authorizationHeader: 'Bearer a.token',
     now: 1_000,
@@ -328,19 +345,19 @@ describe('askAiGate', () => {
   })
 
   it('returns null for an approved caller within the limit', async () => {
-    expect(await askAiGate(gateOpts())).toBeNull()
+    expect(await endpointGate(gateOpts())).toBeNull()
   })
 
   it('returns the refusal when the caller is not authorized', async () => {
-    const refusal = await askAiGate(gateOpts({ authorizationHeader: null }))
+    const refusal = await endpointGate(gateOpts({ authorizationHeader: null }))
     expect(refusal).toMatchObject({ status: 401 })
   })
 
   it('returns a 429 carrying a retry hint once the caller is over the limit', async () => {
     const limiter = createRateLimiter({ limit: 2, windowMs: 60_000 })
-    expect(await askAiGate(gateOpts({ limiter, now: 1_000 }))).toBeNull()
-    expect(await askAiGate(gateOpts({ limiter, now: 2_000 }))).toBeNull()
-    const refusal = await askAiGate(gateOpts({ limiter, now: 3_000 }))
+    expect(await endpointGate(gateOpts({ limiter, now: 1_000 }))).toBeNull()
+    expect(await endpointGate(gateOpts({ limiter, now: 2_000 }))).toBeNull()
+    const refusal = await endpointGate(gateOpts({ limiter, now: 3_000 }))
     expect(refusal?.status).toBe(429)
     expect(refusal?.retryAfterSeconds).toBeGreaterThan(0)
   })
@@ -354,7 +371,65 @@ describe('askAiGate', () => {
     const limiter = createRateLimiter({ limit: 1, windowMs: 60_000 })
     const open = { ...CONFIGURED, required: false }
     for (const now of [1_000, 2_000, 3_000, 4_000]) {
-      expect(await askAiGate(gateOpts({ auth: open, limiter, now }))).toBeNull()
+      expect(await endpointGate(gateOpts({ auth: open, limiter, now }))).toBeNull()
     }
+  })
+})
+
+// ─── Refusal copy names the right feature ────────────────────────────────────
+
+/**
+ * One gate now serves two endpoints — `/api/ask-ai` and `/api/bpn-ranks` — and the
+ * refusal string is the ONLY thing a refused caller ever sees. Hardcoded copy would
+ * tell someone who clicked Import to sign in "to use the assistant", sending them
+ * to investigate a feature they never touched; worse, it reads as a bug in that
+ * feature rather than as a sign-in prompt for this one.
+ *
+ * Asserted against a feature that is deliberately neither real one, so a string
+ * that stopped interpolating cannot pass by resembling the truth.
+ */
+describe('refusal copy', () => {
+  const OTHER: EndpointFeature = {
+    signInTo: 'import ranking data',
+    subject: 'The ranking import',
+    requests: 'imports',
+  }
+
+  it('names the feature when no token is presented', async () => {
+    const { impl } = fakeFetch(json(approved))
+    const result = await authorizeCaller(CONFIGURED, '', impl, OTHER)
+    expect(result).toMatchObject({ error: 'Sign in to import ranking data.' })
+  })
+
+  it('names the feature when it is required but unconfigured', async () => {
+    const { impl } = fakeFetch(json(approved))
+    const result = await authorizeCaller(
+      { required: true, supabaseUrl: '', anonKey: '' },
+      'a.token',
+      impl,
+      OTHER,
+    )
+    expect(result).toMatchObject({
+      error: 'The ranking import cannot verify sign-ins: its Supabase settings are missing.',
+    })
+  })
+
+  it('names the unit of work in the rate-limit refusal', async () => {
+    const limiter = createRateLimiter({ limit: 1, windowMs: 60_000 })
+    const opts = () => ({
+      auth: CONFIGURED,
+      feature: OTHER,
+      limiter,
+      authorizationHeader: 'Bearer a.token',
+      // A fresh Response per call. A body can only be read once, so reusing one
+      // across both requests makes the SECOND call fail in json() and answer
+      // "Could not verify your session" — which looks exactly like the copy bug
+      // this test is here to catch.
+      fetchImpl: fakeFetch(json(approved)).impl,
+    })
+    expect(await endpointGate({ ...opts(), now: 1_000 })).toBeNull()
+    const refusal = await endpointGate({ ...opts(), now: 2_000 })
+    expect(refusal?.error).toContain('That is a lot of imports at once')
+    expect(refusal?.error).not.toContain('questions')
   })
 })

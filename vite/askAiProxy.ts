@@ -1,5 +1,7 @@
 import { loadEnv, type Plugin } from 'vite'
 import {
+  ASK_AI_FEATURE,
+  ASK_AI_RATE_LIMIT,
   isAskAiRequest,
   probeBody,
   readAskAiConfig,
@@ -8,11 +10,10 @@ import {
   type AskAiEvent,
 } from '../server/askAi'
 import {
-  ASK_AI_RATE_LIMIT,
-  askAiGate,
   createRateLimiter,
-  readAskAiAuthConfig,
-} from '../server/askAiAuth'
+  endpointGate,
+  readEndpointAuthConfig,
+} from '../server/endpointAuth'
 
 /**
  * DEV-SERVER ONLY endpoint that lets Ask AI talk to the provider without ever
@@ -45,7 +46,7 @@ export function askAiProxy(): Plugin {
       const env = loadEnv(server.config.mode, process.cwd(), '')
       const read = (name: string) => env[name] || process.env[name] || ''
       const config = readAskAiConfig(read)
-      const authConfig = readAskAiAuthConfig(read)
+      const authConfig = readEndpointAuthConfig(read)
       // One limiter for the life of the dev server, so its counts actually persist
       // across requests the way a warm serverless instance's do.
       const limiter = createRateLimiter(ASK_AI_RATE_LIMIT)
@@ -75,8 +76,9 @@ export function askAiProxy(): Plugin {
           // The same gate, in the same order, as api/ask-ai.ts — through one shared
           // call rather than two hand-written sequences, so dev cannot drift into
           // permitting what production refuses.
-          const refusal = await askAiGate({
+          const refusal = await endpointGate({
             auth: authConfig,
+            feature: ASK_AI_FEATURE,
             limiter,
             authorizationHeader: req.headers.authorization,
             now: Date.now(),

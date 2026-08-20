@@ -1,23 +1,49 @@
 /**
- * Authorization for the assistant endpoint, shared by both hosts.
+ * Authorization for every credentialled endpoint here, shared by both hosts.
  *
- * Lives beside `askAi.ts` for the same reason that does: `vite/askAiProxy.ts` and
- * `api/ask-ai.ts` are two different calling conventions in front of one behaviour,
- * and a check that exists in only one of them is a check that does not exist. Dev
- * would pass while production spent money, or the reverse.
+ * Lives beside `askAi.ts` for the same reason that does: each endpoint has two
+ * hosts — a Vite middleware and a Vercel function — which are two different calling
+ * conventions in front of one behaviour, and a check that exists in only one of them
+ * is a check that does not exist. Dev would pass while production spent money, or
+ * the reverse.
+ *
+ * TWO endpoints call this now, `/api/ask-ai` and `/api/bpn-ranks`, which is why
+ * nothing here is named after the assistant any more. It was `askAiAuth.ts` while
+ * there was one caller; a shared module carrying one caller's name is the same trap
+ * CLAUDE.md invariant 22 describes, where a control's name outlives what it
+ * describes.
  *
  * Why this is needed at all: the sign-in gate in the app is client-side. CLAUDE.md
- * invariant 10 already says so — RLS is the real boundary — and RLS does not cover
- * an OpenAI endpoint. Without a check here, anyone who knows the URL can POST an
- * arbitrary system prompt and arbitrary messages and bill it to the configured key.
+ * invariant 10 already says so — RLS is the real boundary — and RLS covers neither
+ * an OpenAI endpoint nor a third-party ranking panel. Without a check here, anyone
+ * who knows a URL can spend our credential: an arbitrary system prompt billed to
+ * `OPENAI_API_KEY`, or an open proxy onto the vendor's entire panel — 135 domains
+ * belonging to other properties — billed to `SITES_API_KEY`.
  *
  * Every default resolves toward CLOSED. An endpoint that spends money must fail by
  * refusing, never by allowing: a refusal is visible in the UI on the first
- * question, whereas an accidental opening is invisible until the bill arrives.
+ * attempt, whereas an accidental opening is invisible until the bill arrives.
  */
 
+/**
+ * Names one feature in the refusal copy.
+ *
+ * Passed in rather than hardcoded because the copy is the only thing a refused
+ * caller ever sees, and a shared gate that says "Sign in to use the assistant"
+ * while somebody clicks Import sends them to check the wrong thing entirely — or,
+ * worse, reads as a bug in a feature they were not using.
+ */
+export interface EndpointFeature {
+  /** Completes 'Sign in to …' — e.g. 'use the assistant'. No terminal punctuation. */
+  signInTo: string
+  /** Sentence subject, so capitalised — e.g. 'The assistant'. */
+  subject: string
+  /** What one request is, pluralised — e.g. 'questions', 'imports'. */
+  requests: string
+}
+
 /** Read via a caller-supplied lookup, so the two hosts can source env differently. */
-export interface AskAiAuthConfig {
+export interface EndpointAuthConfig {
   /** True unless explicitly opted out. Absence means locked. */
   required: boolean
   /** Empty when unconfigured, which is a misconfiguration rather than an opening. */
@@ -25,11 +51,18 @@ export interface AskAiAuthConfig {
   anonKey: string
 }
 
-export function readAskAiAuthConfig(read: (name: string) => string): AskAiAuthConfig {
+export function readEndpointAuthConfig(read: (name: string) => string): EndpointAuthConfig {
   return {
     // Exactly 'false', and absence requires auth. The inverse default — open unless
     // told otherwise — is the same shape of bug as a firewall that fails open: one
     // forgotten variable on one deploy, and the endpoint is anonymous.
+    //
+    // The name still says ASK_AI even though this now gates the ranking import too,
+    // and that is deliberate: it is ONE switch for every gated endpoint. A second
+    // variable would be a second chance to fail open, and someone would eventually
+    // close one endpoint while leaving the other anonymous. Renaming it is not free
+    // either — it is a deployment contract, documented in CLAUDE.md as a variable
+    // that must stay ABSENT in production, and a rename turns that record stale.
     required: read('ASK_AI_REQUIRE_AUTH') !== 'false',
     // The un-prefixed name wins so a server-only override is possible, but the
     // client's own variables are accepted rather than demanding the same URL be
@@ -54,7 +87,7 @@ export function bearerToken(header: string | null | undefined): string {
   return match ? match[1].trim() : ''
 }
 
-export type AskAiAuthResult =
+export type EndpointAuthResult =
   /** `userId` is null ONLY in opt-out mode, where there is no identity to report. */
   | { ok: true; userId: string | null }
   | { ok: false; status: number; error: string }
@@ -76,17 +109,19 @@ export type AskAiAuthResult =
  *    would bypass approval entirely.
  *
  * `fetchImpl` is injected rather than closed over so this is testable without a
- * network, and so the Vercel runtime's global `fetch` is not assumed.
+ * network, and so the Vercel runtime's global `fetch` is not assumed. `feature`
+ * names the caller in the two refusals a user actually acts on.
  */
-export async function authorizeAskAi(
-  config: AskAiAuthConfig,
+export async function authorizeCaller(
+  config: EndpointAuthConfig,
   token: string,
   fetchImpl: typeof fetch,
-): Promise<AskAiAuthResult> {
+  feature: EndpointFeature,
+): Promise<EndpointAuthResult> {
   if (!config.required) return { ok: true, userId: null }
 
   if (!token) {
-    return { ok: false, status: 401, error: 'Sign in to use the assistant.' }
+    return { ok: false, status: 401, error: `Sign in to ${feature.signInTo}.` }
   }
 
   // Required but unconfigured is a misconfiguration, and the only safe reading of
@@ -97,7 +132,7 @@ export async function authorizeAskAi(
     return {
       ok: false,
       status: 500,
-      error: 'The assistant cannot verify sign-ins: its Supabase settings are missing.',
+      error: `${feature.subject} cannot verify sign-ins: its Supabase settings are missing.`,
     }
   }
 
@@ -209,14 +244,7 @@ export function createRateLimiter(opts: { limit: number; windowMs: number }): Ra
   }
 }
 
-/**
- * Deliberately generous: a reader working through a dashboard asks a handful of
- * follow-ups, and a limit that interrupts normal use would get raised to something
- * meaningless the first time it fired.
- */
-export const ASK_AI_RATE_LIMIT = { limit: 20, windowMs: 5 * 60_000 } as const
-
-export interface AskAiRefusal {
+export interface EndpointRefusal {
   status: number
   error: string
   /** Present only on a 429, where it becomes the `Retry-After` header. */
@@ -226,22 +254,30 @@ export interface AskAiRefusal {
 /**
  * The whole gate, as one call. `null` means "let it through".
  *
- * Both hosts call exactly this, and that is the point rather than a convenience:
- * two call sites each doing authorize-then-limit in their own order is precisely how
- * dev comes to permit what production refuses. `server/askAi.ts` already exists for
- * the same reason on the provider side.
+ * Both hosts of both endpoints call exactly this, and that is the point rather than
+ * a convenience: two call sites each doing authorize-then-limit in their own order
+ * is precisely how dev comes to permit what production refuses, and a second
+ * endpoint written from scratch would have been a second chance to get the order
+ * wrong. `server/askAi.ts` already exists for the same reason on the provider side.
+ *
+ * `feature` is required rather than defaulted. A default would silently attach the
+ * assistant's copy to whichever endpoint forgot to pass one, and the whole reason
+ * the field exists is that wrong-but-plausible copy sends a refused user to
+ * investigate a feature they never touched.
  */
-export async function askAiGate(opts: {
-  auth: AskAiAuthConfig
+export async function endpointGate(opts: {
+  auth: EndpointAuthConfig
+  feature: EndpointFeature
   limiter: RateLimiter
   authorizationHeader: string | null | undefined
   now: number
   fetchImpl: typeof fetch
-}): Promise<AskAiRefusal | null> {
-  const verdict = await authorizeAskAi(
+}): Promise<EndpointRefusal | null> {
+  const verdict = await authorizeCaller(
     opts.auth,
     bearerToken(opts.authorizationHeader),
     opts.fetchImpl,
+    opts.feature,
   )
   if (!verdict.ok) return { status: verdict.status, error: verdict.error }
 
@@ -254,7 +290,7 @@ export async function askAiGate(opts: {
 
   return {
     status: 429,
-    error: `That is a lot of questions at once. Try again in ${rate.retryAfterSeconds} seconds.`,
+    error: `That is a lot of ${opts.feature.requests} at once. Try again in ${rate.retryAfterSeconds} seconds.`,
     retryAfterSeconds: rate.retryAfterSeconds,
   }
 }

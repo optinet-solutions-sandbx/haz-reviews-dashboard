@@ -6,6 +6,8 @@
 // ERR_MODULE_NOT_FOUND and a 500 on every request. Asserted by
 // server/nodeEsm.test.ts, because no build or type-check catches it.
 import {
+  ASK_AI_FEATURE,
+  ASK_AI_RATE_LIMIT,
   isAskAiRequest,
   probeBody,
   readAskAiConfig,
@@ -14,11 +16,10 @@ import {
   type AskAiEvent,
 } from '../server/askAi.js'
 import {
-  ASK_AI_RATE_LIMIT,
-  askAiGate,
   createRateLimiter,
-  readAskAiAuthConfig,
-} from '../server/askAiAuth.js'
+  endpointGate,
+  readEndpointAuthConfig,
+} from '../server/endpointAuth.js'
 
 /**
  * PRODUCTION endpoint for Ask AI, and the deployed counterpart to
@@ -75,8 +76,9 @@ export async function POST(request: Request): Promise<Response> {
   // Before ANY branch that could spend money, and before the key is even read. An
   // anonymous caller must not reach the provider, and must not learn from a POST
   // whether a key is configured either.
-  const refusal = await askAiGate({
-    auth: readAskAiAuthConfig(readEnv),
+  const refusal = await endpointGate({
+    auth: readEndpointAuthConfig(readEnv),
+    feature: ASK_AI_FEATURE,
     limiter,
     authorizationHeader: request.headers.get('authorization'),
     now: Date.now(),

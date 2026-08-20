@@ -30,6 +30,9 @@ and RLS. The visual system and app shell are shared with the sibling
 
 - Spec: `docs/superpowers/specs/2026-08-04-haz-reviews-dashboard-design.md`
 - Plan: `docs/superpowers/plans/2026-08-04-haz-reviews-dashboard.md`
+- BPN ranks API: `docs/integrations/BPN_API.md` — the vendor's reference verbatim,
+  plus what we found that contradicts it. Required reading before touching the
+  ranking-API import.
 
 ## Architecture
 
@@ -61,9 +64,22 @@ are grouped instead:
 
 ## Data flow
 
-1. **Import** — `UploadModal` dynamically imports `src/lib/readWorkbook.ts` (the only
-   module that touches `xlsx`, ~333 kB, kept out of the initial bundle) and calls
-   `parseSheet` → `parseRows`, the pure core.
+1. **Import** — TWO sources, one review panel. `UploadModal` offers a spreadsheet or
+   a live pull from the BPN ranking API, and both converge on `parseRows`, the pure
+   core:
+   - **Spreadsheet** — dynamically imports `src/lib/readWorkbook.ts` (the only module
+     that touches `xlsx`, ~333 kB, kept out of the initial bundle) and calls
+     `parseSheet` → `parseRows`.
+   - **Ranking API** — `src/lib/bpnRanks.ts` fetches `/api/bpn-ranks`, then
+     `src/lib/bpnRows.ts` maps the vendor rows into the same TABLE shape and calls
+     `parseRows` itself. Deliberately not a `Snapshot` built by hand: going through
+     the parser inherits dedupe, market ordering, unmatched-keyword collection, date
+     detection and grouping, which makes it IMPOSSIBLE for a pull and a file import
+     to disagree about any of them rather than merely unlikely.
+
+   Both then land on the same summary, the same editable snapshot date, the same
+   duplicate-date warning and the same confirm — so neither is a write path without a
+   preview. See invariants 42, 44 and 45, and `docs/integrations/BPN_API.md`.
 2. **Persist** — `upsertSnapshot` in `src/lib/storage.ts`. Wipe-and-replace keyed on
    a deterministic `snap-<raw_date>` id, so a same-date re-import replaces rather
    than duplicates. **Not atomic** — several round trips, no transaction. A partial
@@ -228,7 +244,7 @@ Violating any of these produces silent wrongness rather than an error.
     rethrow but no `catch` on the promise, every mount logs an unhandled
     rejection. Asserted by the abort test in `src/lib/assistant.test.ts`.
 34. **Never let the assistant endpoint's authorization default to open.**
-    `ASK_AI_REQUIRE_AUTH` is read in `server/askAiAuth.ts`, and only an exact
+    `ASK_AI_REQUIRE_AUTH` is read in `server/endpointAuth.ts`, and only an exact
     `'false'` opts out — absence means REQUIRED. A required check with no Supabase
     settings behind it refuses too, rather than falling through to allowed.
     Both directions matter, because the app's own gate cannot cover this endpoint:
@@ -249,9 +265,15 @@ Violating any of these produces silent wrongness rather than an error.
     key alone resolves `auth.uid()` to null, returns zero rows, and reads as
     "nobody is approved".
 
-    Both hosts call `askAiGate` — one function, not two hand-written sequences — so
-    the order of authorize-then-limit cannot differ between dev and production.
-    Exactly why `server/askAi.ts` already exists on the provider side.
+    Both hosts call `endpointGate` — one function, not two hand-written sequences —
+    so the order of authorize-then-limit cannot differ between dev and production.
+    Exactly why `server/askAi.ts` already exists on the provider side. That module
+    was `askAiAuth.ts` until the ranking import became a second caller; it gates
+    BOTH endpoints now and takes an `EndpointFeature` so each one names itself in
+    the refusal copy. The env variable keeps its historical name deliberately — ONE
+    switch for every gated endpoint, because a second variable is a second chance to
+    fail open, and somebody would eventually close one endpoint and leave the other
+    anonymous. See invariant 43.
 
     The rate limit is in memory, per instance. That makes it a speed bump against
     one signed-in account burning the budget, NOT a spend ceiling: a deployed
@@ -411,6 +433,107 @@ Violating any of these produces silent wrongness rather than an error.
     Wiring has no unit-test surface here (node environment, no DOM), so this was
     caught and fixed in a browser — invariant 33's lesson again.
 
+42. **Never let a vendor's `position: 0` reach a record.** The BPN panel documents
+    `null` for a keyword that is not ranking and sends `0` — 60 of 144 rows on the
+    domain this was verified against, on both `position` and `previous_position`,
+    with not one `null` among them. Passed through, `0` is not merely wrong, it is
+    wrong in the direction that looks like SUCCESS: it is the best rank obtainable,
+    so a keyword ranking nowhere sorts ahead of position 1 and lands inside every
+    top-N band. Measured on that real pull, untreated it would have reported average
+    position **4.03 instead of 6.90**, top-3 **103 instead of 43**, top-10 **137
+    instead of 77** and **zero** not-ranking keywords instead of 60.
+
+    `mapPosition` in `src/lib/bpnRows.ts` therefore inverts the test: it accepts only
+    a finite number of at least 1 and maps everything else — `0`, negatives, `null`,
+    `NaN`, `Infinity`, a non-numeric string — to `'NR'`. Rejecting the known bad
+    value instead would be a list to extend every time the vendor invents a new
+    spelling.
+
+    The one visible symptom would have been the two panels DISAGREEING, because
+    `computeStats` tests `pos >= 1 && pos <= 3` and `computeTiers` tests `pos <= 3`.
+    Same screen, 60 apart, and nothing logged.
+
+    `change` is discarded for the same class of reason and is not a separate rule so
+    much as the same one: a real row reads `position 0, previous_position 9,
+    change 9`, claiming a 9-place improvement for a keyword that left the results.
+    Movement is recomputed from the mapped positions, and left EMPTY when either side
+    is not a rank — "moved down 5" is not what happens when a keyword vanishes, and
+    the distance from nowhere to 5 is not a number.
+
+43. **Never give a shared endpoint gate a second opt-out variable, and never let it
+    use one feature's copy for another.** `server/endpointAuth.ts` gates both
+    `/api/ask-ai` and `/api/bpn-ranks`. Two things follow, pulling in opposite
+    directions, and both matter.
+
+    ONE switch: `ASK_AI_REQUIRE_AUTH` keeps its historical name and is read once for
+    every endpoint. A per-endpoint variable doubles the number of ways to fail open
+    and guarantees that somebody eventually closes one door and leaves the other
+    ajar. The name is stale; that is strictly cheaper than the alternative, and
+    renaming it would also invalidate the deployment table below, which records it as
+    a variable that must stay ABSENT.
+
+    SEPARATE copy: `endpointGate` takes a required `EndpointFeature`, never a
+    default. A signed-out click on Import that answered "Sign in to use the
+    assistant" would send the user to investigate a feature they never touched, and
+    would read as a bug in that feature rather than as a sign-in prompt for this one.
+    Required rather than defaulted precisely so a third endpoint cannot silently
+    inherit the assistant's wording. Asserted against a feature that is deliberately
+    neither real one, so copy that stopped interpolating fails instead of passing by
+    resembling the truth.
+
+44. **Never accept the BPN project id, the action, or the domain from a caller
+    without deciding them in `server/bpnRanks.ts`.** All three fail silently if
+    trusted.
+
+    `project_id=0` does NOT filter — PHP reads `0` as falsy, drops the condition and
+    returns every project the key can see. So a caller who omitted it, or sent `0`,
+    or sent anything coercing to `0`, would WIDEN the pull rather than narrow it. It
+    is a literal, `18`.
+
+    The action is an ALLOW-LIST of `results` and `domains`, GET only, and `check_all`
+    is what it exists for: an hours-long sweep of ~1,727 keywords at ~7s each on a
+    single-threaded queue, which nothing in our UI could cancel and a double-click
+    would request twice. It is unreachable by two independent means — the function
+    exports no POST, and the allow-list refuses the action even over GET.
+
+    The domain is validated as a hostname before it is forwarded, because it is
+    interpolated into a URL we then fetch WITH OUR CREDENTIAL ATTACHED. The character
+    check is a negated class searched ANYWHERE, not an anchored allow-list: in
+    JavaScript `$` also matches immediately before a trailing newline without the `m`
+    flag, so `/^[a-z0-9.-]+$/` accepts `"example.com\n"`. Bare IPs are refused by
+    requiring an alphabetic TLD — an IP is how a proxy gets aimed at a metadata
+    service.
+
+    And the clamps have a coercion trap of their own, tested before anything else:
+    `Number(null)` and `Number('')` are both `0`, which is FINITE, so
+    `Number.isFinite(n) ? clamp(n) : fallback` reads an ABSENT parameter as zero and
+    clamps it to the minimum. For a page size that is one row per page — and one row
+    is shorter than a page, so the pagination terminates immediately and the import
+    reports success having pulled a single keyword. Absence is tested before any
+    coercion.
+
+45. **Never terminate BPN pagination on `meta.total`, and never persist an empty
+    pull.** Two separate ways to record a partial week as a complete one.
+
+    Pagination stops on a page SHORTER than the size requested. `meta.total` has been
+    reported disagreeing with the array it describes, and `action=domains` reports a
+    count of DOMAINS under that same key — so it is a number the vendor computes with
+    a different query from the one that filled `data`. (Not reproduced on 2026-08-20;
+    recorded as unconfirmed rather than withdrawn, because the defence costs one
+    extra request on an exact multiple and removes the whole class.) When the page
+    ceiling does stop the walk, the response says `truncated: true` and the modal
+    says so too — a truncated pull that looked complete would be committed as the
+    week.
+
+    An empty pull THROWS, in `parseBpnRows`, and this is not hypothetical:
+    `hazreviews.com` is not in the panel, so every pull for our own property returns
+    zero rows today. Persisting that would write a snapshot recording "ranked for
+    nothing this week" as a measurement, and it would immediately become the newest
+    snapshot every delta on every page is computed against — the damage outlives the
+    mistake and looks exactly like data. The message names the domain and says the
+    panel may not track it, because the honest diagnosis is "not tracked" and the
+    tempting wrong one is "the integration is broken".
+
 ## Conventions
 
 | Convention | Detail |
@@ -440,10 +563,21 @@ test) and
 without erroring).
 `authRedirect` (the `next` parameter's open-redirect defences, each disguise
 asserted separately, plus the three recovery-link states) and
-`askAiAuth` (every default asserted in the CLOSED direction, because the failure
-mode of this one is a silent open door that spends money rather than an error).
+`endpointAuth` (every default asserted in the CLOSED direction, because the failure
+mode of this one is a silent open door that spends money rather than an error, plus
+the refusal copy, asserted against a feature that is neither real one so a hardcoded
+name cannot pass by resembling the truth) and the two BPN modules:
+`bpnRanks` server-side (the allow-list, the absence-before-coercion clamp trap, ten
+domain disguises one at a time, the pinned project id, pagination terminating on a
+short page while `meta.total` lies, and that NO caller parameter reaches the vendor
+except the ones the core chose) and `bpnRows` (the mapping, asserted through
+`computeStats`/`computeTiers`/`avgPosition` rather than on cell values — the point is
+that the stat cards read correctly, not that a string has a particular shape), with
+`bpnRanks` client-side covering the abort rethrow and grepping its own source for the
+vendor host, the upstream path and any key prefix.
 
-`npm run build` is the primary regression net — `tsc -b` covers both projects.
+411 tests. `npm run build` is the primary regression net — `tsc -b` covers both
+projects.
 
 ## Known state
 
@@ -502,12 +636,36 @@ reading one's own row.
 **As of 2026-08-19 `.env.local` holds REAL credentials** for project
 `lplcodzxneqbubzsgfnv`, and the client provably reaches it: a sign-in attempt
 returns Supabase's own `Invalid login credentials` rather than `Failed to fetch`.
-The three dev-force flags and `ASK_AI_REQUIRE_AUTH` are gone with them.
+The three dev-force flags and `ASK_AI_REQUIRE_AUTH` are gone with them. It also
+holds `SITES_API_KEY` as of 2026-08-20 — server-side, no `VITE_` prefix, verified
+absent from `dist/` along with the vendor host and the upstream path.
 
-What is NOT done: **the database is still empty** — PostgREST answers `PGRST205`
-(`Could not find the table 'public.user_access'`) for every table, so no SQL has
-run. Remaining, in order, and none of it doable from here because DDL needs the
-service-role key or the SQL editor:
+**Port 3002 is currently taken by a SIBLING project.** The dev server for
+`Online-Casino-Kuwait-Dashboard` was holding it on 2026-08-20, so `npm run dev` here
+fails outright — `strictPort` doing its job, which is a genuine collision rather than
+a misconfiguration to work around. The comment in `vite.config.ts` lists 3000 and
+3001 as the sibling ports and does not know about this one. Either move that project
+or run this one with `npx vite --port 3010`; do not quietly reassign the port here,
+since 3002 is what the team expects.
+
+**The four steps below are DONE, contrary to what this section claimed until
+2026-08-20.** It said the database was still empty and that PostgREST answered
+`PGRST205` for every table. That is no longer true, and it is worth being precise
+about how it was established rather than asserted: signing in at
+`/auth/v1/token?grant_type=password` with the `.env.local` credentials returns a real
+access token, and reading `user_access` with that token returns exactly one row —
+`status: approved`, `is_admin: true`. Read anonymously the same table returns `[]`,
+which is RLS filtering rather than an absent table.
+
+So the schema has run, the auth user exists, it is seeded approved+admin, and
+`VITE_REQUIRE_AUTH=true` is set. Note the internal contradiction this resolves: the
+"round trip is VERIFIED" paragraph above described importing data through this same
+account, which could not have been true of an empty database. When two parts of this
+file disagree, check the live project before believing either.
+
+The original sequence is kept below, because it is still the correct recipe for a
+FRESH project and none of it is doable from here — DDL needs the service-role key or
+the SQL editor:
 
 1. Run `supabase/setup.sql` → `auth-lockdown.sql` in the SQL editor.
    `add-site-column.sql` is a **no-op on a fresh install** — its own header says so
@@ -617,8 +775,9 @@ two-turn thread, the offline state, and a provider failure.
   which is the probe working as designed. `src/lib/assistant.ts` stays
   provider-blind, so swapping in a Supabase Edge Function later needs no client
   change.
-- **The endpoint authorizes its own callers** — `server/askAiAuth.ts`, shared by
-  both hosts through one `askAiGate` call. A Supabase session is verified by a
+- **The endpoint authorizes its own callers** — `server/endpointAuth.ts`, shared by
+  both hosts through one `endpointGate` call, and shared again with the ranking
+  import. A Supabase session is verified by a
   single PostgREST read of the caller's own `user_access` row, which also refuses a
   `pending` or `revoked` account, plus a per-user rate limit. `ASK_AI_REQUIRE_AUTH`
   opts out on an exact `'false'` and nothing else; absence means required. See
@@ -667,13 +826,55 @@ two-turn thread, the offline state, and a provider failure.
   and sending would spend a request on the wrong question. Note that Chrome
   implements this by streaming audio to Google's speech service.
 
+## BPN ranks API
+
+A second import source beside the spreadsheet, added 2026-08-20 at Ivan's request —
+the same integration `BIF-Dashboard` and `Ranking-Reports` already have. Full vendor
+reference plus everything we learned the hard way: `docs/integrations/BPN_API.md`.
+Read it before touching any of this; the payload is wrong in five ways that do not
+error.
+
+**The finding to know first: `hazreviews.com` is NOT in the panel.** It indexes
+casino-BRAND domains — 135 of them, `7bitcasino.digital`, `bohocasino.fun`,
+`funrize.vip` — not the affiliate site reviewing them. So the integration works end
+to end and returns ZERO ROWS for our own property until somebody adds it. That is
+data availability, not a bug, and invariant 45's empty-pull guard is what turns it
+into a sentence instead of a corrupt snapshot. Use `gulfrecoverygroup.com` (144 rows,
+the only non-casino domain in the panel) to see the path work.
+
+- **One core, two thin hosts, one blind client.** `server/bpnRanks.ts` makes every
+  decision exactly once — allow-list, pinned project id, clamps, hostname validation,
+  timeout, pagination, and the ORDER the gate runs in. `vite/bpnRanksProxy.ts`
+  (`apply: 'serve'`) and `api/bpn-ranks.ts` (named `GET` export, invariant 32) are
+  signature adapters that read env, call `serveBpnRanks`, and write what it returns.
+  They decide nothing, which is what makes dev and production incapable of drifting.
+- **The proxy is mandatory for two independent reasons**, either sufficient alone: a
+  `VITE_`-prefixed key would be readable in devtools (invariant 27), and the vendor is
+  a third-party origin so a direct browser call is refused by CORS anyway.
+- **`SITES_API_KEY`, no `VITE_` prefix**, travelling to the vendor in an
+  `Authorization: Bearer` header rather than a query string, so it stays out of
+  upstream access logs. Env is read once at server start — restart after editing.
+- **The gate is the assistant's gate**, `endpointGate`, with its own
+  `EndpointFeature` so the refusal says "Sign in to import ranking data." (invariant
+  43). Ungated this is an open proxy onto 135 other properties' rankings billed to our
+  key. `GET` with no `action` is the readiness probe and stays open, for the same
+  reason Ask AI's does: a signed-out page must be able to explain a disabled control.
+- **The UI is the EXISTING import modal**, a second source tab feeding the same review
+  panel, editable snapshot date and confirm. A separate refresh dialog would have been
+  the only write path in the app with no preview.
+- **Verified against the live upstream on 2026-08-20** — anonymous, forbidden action,
+  invalid domain, wrong method, our own domain and a domain the panel holds, plus a
+  real multi-page walk. Statuses are tabulated in the integration doc.
+
 ## Deployment
 
 Vercel, under the `sandbox` team, from the GitHub repo owned by the sandbox
 account. `vercel.json` carries two things: the SPA rewrite (every path to
 `index.html`, because routing is client-side and a hard refresh on `/rankings`
-would otherwise 404) and a 60-second `maxDuration` for `api/ask-ai.ts` — the
-default 10 seconds can cut a long streamed answer off mid-sentence.
+would otherwise 404) and a 60-second `maxDuration` for **both** functions —
+`api/ask-ai.ts`, where the default 10 seconds can cut a long streamed answer off
+mid-sentence, and `api/bpn-ranks.ts`, where one pull can be several sequential
+upstream requests at up to 20 seconds each.
 
 **DEMO MODE WAS RETIRED on 2026-08-19.** The live deployment is now the REAL
 gated app, pointed at Supabase project `lplcodzxneqbubzsgfnv` — the same one
@@ -687,7 +888,8 @@ described one until that date. Its environment variables:
 | `VITE_REQUIRE_AUTH` | `true` | the whole app sits behind sign-in plus admin approval |
 | `OPENAI_API_KEY` | absent today | Ask AI reports itself offline until one is added, which is the probe working as designed |
 | `OPENAI_MODEL` | optional, e.g. `gpt-4o-mini` | defaults to `gpt-4o` |
-| `ASK_AI_REQUIRE_AUTH` | **ABSENT**, and must stay absent | absence means REQUIRED (invariant 34). It was `false` under demo mode because a demo can hold no session; leaving it behind on a real deployment would reopen an anonymous OpenAI proxy |
+| `SITES_API_KEY` | real BPN key, set on Production 2026-08-20 | the ranking-API import. SERVER-SIDE ONLY, no `VITE_` prefix (invariant 27) — it reaches a third-party panel holding 135 domains belonging to other properties. Without it the import modal's Ranking API tab reports itself unavailable and says why; the spreadsheet source is unaffected |
+| `ASK_AI_REQUIRE_AUTH` | **ABSENT**, and must stay absent | absence means REQUIRED (invariant 34), and it now gates BOTH endpoints (invariant 43) — so leaving it behind on a real deployment would reopen an anonymous OpenAI proxy AND an anonymous proxy onto the vendor's whole panel. It was `false` under demo mode because a demo can hold no session |
 
 `VITE_DEMO_MODE` is **gone**, not set to `false`. Only the exact string `'true'`
 enables it, so either works — but an absent flag cannot be misread by whoever
@@ -703,11 +905,19 @@ Then note that `vercel env pull` **cannot read encrypted values back** — it wr
 is not. The only honest check is the built artefact: deploy, then grep the live
 JS asset for the project ref. That is how both states above were told apart.
 
-Those are set on **Production only**. Vercel CLI 54 cannot target "all
-Preview branches" non-interactively — it demands a specific branch name — so a
-preview deployment currently white-screens, because `supabase.ts` throws at module
-load without the two placeholders. Fix it in the dashboard when you first need a
-preview: Settings → Environment Variables → tick Preview. Production is unaffected.
+Those are set on **Production only**, and a preview deployment therefore still
+white-screens because `supabase.ts` throws at module load without the two Supabase
+values. Fix it in the dashboard when you first need a preview: Settings →
+Environment Variables → tick Preview. Production is unaffected.
+
+One correction to what this section said before 2026-08-20: CLI 54 **can** target all
+Preview branches non-interactively, and it tells you how — `vercel env add NAME
+preview` refuses to prompt and prints `vercel env add NAME preview --value <value>
+--yes` as the way to do it. `SITES_API_KEY` was still added to Production only, and
+deliberately: `--value` puts the secret on the command line, where it lands in shell
+history and in any process listing, which is a worse exposure than the stdin trap
+this paragraph exists to warn about. There is nothing to gain by it either while
+preview deployments cannot render at all.
 
 The GitHub repo is connected, so every push to `master` redeploys to production.
 `vercel --prod` from a working copy does the same thing without a push.
@@ -720,3 +930,15 @@ not be carried forward. Adding `OPENAI_API_KEY` is what turns Ask AI on there, a
 that is the moment the endpoint can start spending: the
 rate limit is per-instance and in memory, so the only hard spend ceiling is a cap
 set on the key at the provider.
+
+**`api/bpn-ranks.ts` has not been deployed yet.** `SITES_API_KEY` is set on
+Production, but the function reaching it is only on the `feat/bpn-ranks-import`
+branch, so nothing on the live site serves that path today — the deployed page would
+report the import unavailable, which is the probe working as designed. Note that
+`vercel env ls` showing the variable proves nothing about its VALUE: `vercel env pull`
+cannot read encrypted values back, so the only honest check is behavioural, and here
+it is a good one — hit the deployed `/api/bpn-ranks` with no `action` after merging.
+`{"ranks":"ready"}` means the key is non-empty; `{"ranks":"unconfigured"}` means the
+stdin trap above swallowed it. That is the same "read the write row, not the read row"
+discipline `verify:supabase` uses, and it costs one anonymous GET because the probe
+is deliberately ungated.
